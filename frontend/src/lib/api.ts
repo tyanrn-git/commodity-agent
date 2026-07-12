@@ -585,6 +585,8 @@ export type InternetSourceMatch = {
   matched_count: number;
   product_keywords: string[];
   regions: string[];
+  sources_discovered?: number;
+  discovery_notes?: string | null;
 };
 
 export type InternetSourceSearchRun = {
@@ -606,6 +608,7 @@ export type InternetSourceSearchRun = {
   finished_at: string | null;
   created_at: string;
   updated_at: string;
+  sources_discovered?: number;
 };
 
 export type TenderMonitoringRow = {

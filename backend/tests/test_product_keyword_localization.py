@@ -98,6 +98,16 @@ def test_spanish_input_for_french_platform(db):
     assert "fertilizante" not in lowered
 
 
+def test_localize_russian_gum_keyword_for_english_platform(db):
+    source = _make_source(languages=["en"])
+    search_set = build_keyword_search_set(db, ["камедь"])
+    localized = localize_keywords_for_source(search_set, source=source)
+
+    lowered = [term.lower() for term in localized]
+    assert "gum arabic" in lowered or "guar gum" in lowered
+    assert not any(term.lower() == "камедь" for term in localized)
+
+
 def test_equivalent_terms_support_multiple_languages():
     spanish = equivalent_terms_for_languages("карбамид", ["es"])
     french = equivalent_terms_for_languages("карбамид", ["fr"])

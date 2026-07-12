@@ -149,6 +149,26 @@ class TenderSearchOutput(BaseModel):
     notes: str | None = None
 
 
+class InternetSourceCandidateOutput(BaseModel):
+    name: str
+    base_url: str
+    source_kind: str = "TENDER_PORTAL"
+    access_mode: str = "PUBLIC"
+    fetch_strategy: str = "HTML"
+    regions: list[str] = Field(default_factory=list)
+    product_tags: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+    description: str | None = None
+    search_hints: str | None = None
+    confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    evidence: str | None = None
+
+
+class InternetSourceDiscoveryOutput(BaseModel):
+    candidates: list[InternetSourceCandidateOutput] = Field(default_factory=list)
+    notes: str | None = None
+
+
 class TenderFeasibilityOutput(BaseModel):
     feasible: bool
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)

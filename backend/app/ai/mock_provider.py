@@ -17,6 +17,7 @@ from app.ai.schemas import (
     RFQDraftOutput,
     TenderFeasibilityOutput,
     TenderSearchOutput,
+    InternetSourceDiscoveryOutput,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -93,6 +94,8 @@ class MockAIProvider(AIProvider):
             payload = _match_tender_search_fixture(user_prompt)
         elif output_schema is TenderFeasibilityOutput:
             payload = _match_tender_feasibility_fixture(user_prompt)
+        elif output_schema is InternetSourceDiscoveryOutput:
+            payload = _match_internet_source_discovery_fixture(user_prompt)
         else:
             payload = {}
 
@@ -399,4 +402,77 @@ def _match_tender_feasibility_fixture(text: str) -> dict:
         "gross_margin_percent": 6.5,
         "margin_currency": "USD",
         "risks": ["Срок подачи заявки", "Точная спецификация покупателя"],
+    }
+
+
+def _match_internet_source_discovery_fixture(text: str) -> dict:
+    if re.search(r"Known catalog", text, re.IGNORECASE):
+        known_urls = set(re.findall(r"https?://[^\s|]+", text))
+    else:
+        known_urls = set()
+
+    candidates: list[dict] = []
+
+    def add_candidate(**kwargs) -> None:
+        url = kwargs.get("base_url", "")
+        if url and url not in known_urls:
+            candidates.append(kwargs)
+
+    if re.search(r"гуар|guar|камедь|gum", text, re.IGNORECASE):
+        add_candidate(
+            name="Government e-Marketplace (GeM) — Guar",
+            base_url="https://gem.gov.in/",
+            source_kind="GOV_REGISTRY",
+            regions=["India"],
+            product_tags=["guar gum", "гуаровая камедь", "камедь"],
+            languages=["en", "hi"],
+            search_hints="Search bids for guar gum, food hydrocolloids, and gum powder.",
+            confidence=0.82,
+            evidence="Major Indian public procurement portal for guar and food gums.",
+        )
+        add_candidate(
+            name="NCDEX Spot Tender Notices",
+            base_url="https://www.ncdex.com/",
+            source_kind="AGGREGATOR",
+            regions=["India"],
+            product_tags=["guar gum", "гуар", "commodities"],
+            languages=["en"],
+            search_hints="Check commodity notices and member tender circulars.",
+            confidence=0.71,
+            evidence="Indian commodity exchange relevant for guar trading desk.",
+        )
+
+    if re.search(r"urea|карбамид|fertilizer|удобр", text, re.IGNORECASE):
+        add_candidate(
+            name="Rashtriya Chemicals and Fertilizers",
+            base_url="https://www.rcfltd.com/tenders",
+            source_kind="TENDER_PORTAL",
+            regions=["India"],
+            product_tags=["urea", "fertilizer", "карбамид"],
+            languages=["en"],
+            search_hints="Open tender notices for fertilizer imports and procurement.",
+            confidence=0.84,
+            evidence="Indian PSU fertilizer producer with public tender page.",
+        )
+
+    if re.search(r"sn\s*500|base oil|нефт", text, re.IGNORECASE):
+        add_candidate(
+            name="EU Oil & Gas Procurement Hub",
+            base_url="https://example-oil-procurement.eu/tenders",
+            source_kind="TENDER_PORTAL",
+            regions=["EU"],
+            product_tags=["base oil", "sn500", "lubricants"],
+            languages=["en"],
+            search_hints="Filter lubricants and base oil supply tenders.",
+            confidence=0.68,
+            evidence="Fixture portal for EU base oil desk discovery tests.",
+        )
+
+    return {
+        "candidates": candidates[:5],
+        "notes": (
+            f"Mock discovery proposed {len(candidates)} new platform(s); skipped URLs already in catalog."
+            if candidates
+            else "Catalog already contains suitable sources for this product."
+        ),
     }

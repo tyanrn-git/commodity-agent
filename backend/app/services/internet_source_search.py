@@ -33,6 +33,7 @@ from app.integrations.tender_feeds import (
 )
 from app.services.document_parser import fetch_public_url_text
 from app.services.internet_source_catalog import list_internet_sources, match_internet_sources
+from app.services.internet_source_discovery import discover_and_register_sources
 from app.services.product_keyword_localization import (
     build_keyword_search_set,
     localize_keywords_for_source,
@@ -194,8 +195,6 @@ def _persist_hits(
         if content_hash in seen_hashes:
             continue
         seen_hashes.add(content_hash)
-        hits_found += 1
-        hits_new += 1
 
         evaluation = evaluate_tender_hit(
             item,
@@ -203,6 +202,11 @@ def _persist_hits(
             reference_date=reference_date,
         )
         status_value = _hit_status_from_evaluation(evaluation)
+        if status_value == InternetSourceSearchHitStatus.FILTERED_OUT.value:
+            continue
+
+        hits_found += 1
+        hits_new += 1
         if status_value == InternetSourceSearchHitStatus.FOUND.value:
             active_hits += 1
 
@@ -362,10 +366,22 @@ def run_internet_source_search(
     access_mode: str | None = MonitoringAccessMode.PUBLIC.value,
     max_sources: int = MAX_SOURCES_PER_RUN,
     verify_real: bool = True,
-) -> InternetSourceSearchRun:
+    auto_discover_sources: bool = True,
+) -> tuple[InternetSourceSearchRun, int]:
     keywords = _normalize_tags(product_keywords)
     if not keywords:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="product_keywords required")
+
+    sources_discovered = 0
+    if auto_discover_sources:
+        discovery = discover_and_register_sources(
+            db,
+            user=user,
+            product_keywords=keywords,
+            regions=regions,
+            access_mode=access_mode,
+        )
+        sources_discovered = len(discovery.added_sources)
 
     search_set = build_keyword_search_set(db, keywords)
     match_keywords = search_set.match_terms()
@@ -530,7 +546,7 @@ def run_internet_source_search(
         )
         db.commit()
         db.refresh(run)
-        return run
+        return run, sources_discovered
     except Exception as exc:
         run.status = InternetSourceSearchRunStatus.FAILED.value
         run.error_message = str(exc)
@@ -538,4 +554,4 @@ def run_internet_source_search(
         run.ai_calls = ai_calls
         db.commit()
         db.refresh(run)
-        return run
+        return run, sources_discovered

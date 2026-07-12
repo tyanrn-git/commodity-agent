@@ -288,6 +288,8 @@ def seed_products(db: Session) -> None:
     products = [
         ("SN500", "base_oil", ["Base Oil SN500"], ["MT", "kg"]),
         ("SN150", "base_oil", ["Base Oil SN150"], ["MT", "kg"]),
+        ("Guar Gum", "polymer", ["guar gum", "гуар", "гуаровая камедь", "камедь"], ["MT", "kg"]),
+        ("Gum Arabic", "polymer", ["gum arabic", "acacia gum", "арабская камедь", "гуммиарабик", "камедь"], ["MT", "kg"]),
     ]
     for name, category, aliases, units in products:
         existing = db.scalar(select(Product).where(Product.normalized_name == name))

@@ -27,13 +27,57 @@ def _pick_title(title_field) -> str:
 
 
 def _keyword_query(keywords: list[str]) -> str:
-    terms = [re.sub(r"[^\w\-]+", "", keyword.lower()) for keyword in keywords if keyword.strip()]
-    terms = [term for term in terms if term]
-    if not terms:
+    clauses: list[str] = []
+    seen: set[str] = set()
+
+    def add_clause(clause: str) -> None:
+        if clause and clause not in seen:
+            seen.add(clause)
+            clauses.append(clause)
+
+    for keyword in keywords:
+        cleaned = keyword.strip()
+        if not cleaned:
+            continue
+        if " " in cleaned:
+            safe = cleaned.replace('"', "")
+            add_clause(f'FT~"{safe}"')
+            continue
+        token = re.sub(r"[^\w\-]+", "", cleaned.lower())
+        if token:
+            add_clause(f"FT~{token}")
+
+    if not clauses:
         return "FT~procurement"
-    if len(terms) == 1:
-        return f"FT~{terms[0]}"
-    return " OR ".join(f"FT~{term}" for term in terms)
+    if len(clauses) == 1:
+        return clauses[0]
+    return " OR ".join(clauses)
+
+
+def _prioritize_ted_keywords(keywords: list[str], *, max_terms: int = 6) -> list[str]:
+    generic = {"gum", "resin", "смола", "goma", "gomme"}
+    ranked = sorted(keywords, key=lambda value: (-len(value.split()), -len(value), value.lower()))
+    selected: list[str] = []
+    for keyword in ranked:
+        cleaned = keyword.strip()
+        if not cleaned:
+            continue
+        if cleaned.lower() in generic and len(ranked) > 1:
+            continue
+        if cleaned not in selected:
+            selected.append(cleaned)
+        if len(selected) >= max_terms:
+            break
+    return selected or [keyword.strip() for keyword in keywords if keyword.strip()][:max_terms]
+
+
+def _product_from_notice_text(text: str, keywords: list[str]) -> str | None:
+    haystack = text.lower()
+    for keyword in sorted(keywords, key=lambda value: (-len(value.split()), -len(value))):
+        cleaned = keyword.strip()
+        if cleaned and cleaned.lower() in haystack:
+            return cleaned
+    return None
 
 
 def search_ted_notices(
@@ -42,6 +86,7 @@ def search_ted_notices(
     search_date: datetime,
     limit: int = 10,
 ) -> tuple[list[TenderSearchHitOutput], str]:
+    keywords = _prioritize_ted_keywords(keywords)
     date_from = (search_date.astimezone(timezone.utc) - timedelta(days=30)).strftime("%Y%m%d")
     query = f"{_keyword_query(keywords)} AND PD>={date_from}"
     payload = {
@@ -76,7 +121,7 @@ def search_ted_notices(
             TenderSearchHitOutput(
                 title=title,
                 url=url,
-                product=keywords[0] if keywords else None,
+                product=_product_from_notice_text(title, keywords),
                 buyer=str(buyer) if buyer else None,
                 publication_date=publication_date,
                 body=title,
@@ -93,7 +138,14 @@ def search_world_bank_notices(
     search_date: datetime,
     limit: int = 10,
 ) -> tuple[list[TenderSearchHitOutput], str]:
-    term = keywords[0] if keywords else "fertilizer"
+    term = next(
+        (
+            keyword
+            for keyword in keywords
+            if re.search(r"[a-zA-Z]", keyword) and len(keyword.strip()) >= 3
+        ),
+        keywords[0] if keywords else "procurement",
+    )
     params = {"format": "json", "qterm": term, "rows": str(limit)}
     with httpx.Client(timeout=30.0, follow_redirects=True) as client:
         response = client.get(
@@ -119,18 +171,19 @@ def search_world_bank_notices(
             continue
 
         title = notice.get("bid_description") or notice.get("project_name") or notice.get("id")
+        body = str(notice.get("bid_description") or notice.get("project_name") or "")
         url = f"https://projects.worldbank.org/en/projects-operations/procurement-detail/{notice.get('id')}"
         hits.append(
             TenderSearchHitOutput(
                 title=str(title),
                 url=url,
-                product=term,
+                product=_product_from_notice_text(body or str(title), keywords),
                 buyer=notice.get("project_ctry_name"),
                 destination=notice.get("project_ctry_name"),
                 publication_date=parsed_date.isoformat() if parsed_date else None,
                 submission_deadline=notice.get("submission_date"),
                 deadline=notice.get("submission_date"),
-                body=str(notice.get("bid_description") or notice.get("project_name") or ""),
+                body=body,
                 confidence=0.93,
                 evidence_excerpt=(
                     f"World Bank {notice.get('id')}: {notice.get('bid_description') or notice.get('project_name')}"

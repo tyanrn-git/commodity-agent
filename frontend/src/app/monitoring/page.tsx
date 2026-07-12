@@ -198,6 +198,9 @@ export default function MonitoringPage() {
       include_inactive: showInactiveSources,
     });
     setSources(match.sources);
+    if (match.sources_discovered && match.sources_discovered > 0) {
+      setMessage(`AI добавил ${match.sources_discovered} новых площадок в каталог`);
+    }
   }
 
   async function onToggleSourceActive(source: InternetSource) {
@@ -284,10 +287,11 @@ export default function MonitoringPage() {
       setSearchRun(run);
       const hits = await apiClient.listInternetSourceSearchHits(run.id);
       setSearchHits(hits);
-            setMessage(
-                `Поиск: ${run.status} · источников ${run.sources_scanned}/${run.sources_matched} · ` +
-                  `найдено ${run.hits_found} · перенесено в возможности ${run.opportunities_created}`
-            );
+      setMessage(
+        `Поиск: ${run.status} · источников ${run.sources_scanned}/${run.sources_matched} · ` +
+          `найдено ${run.hits_found} · перенесено в возможности ${run.opportunities_created}` +
+          (run.sources_discovered ? ` · AI добавил площадок ${run.sources_discovered}` : "")
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка AI-поиска");
     } finally {
@@ -416,11 +420,10 @@ export default function MonitoringPage() {
         <div style={styles.card}>
           <h2 style={{ marginTop: 0 }}>Каталог источников</h2>
           <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
-            Системные источники загружаются при старте. Можно добавить свои и отфильтровать по
-            товару и региону. Если в каталоге нет точного совпадения, поиск всё равно проверит
-            общие ленты TED и World Bank. Результаты сохраняются в мониторинге. Перенос в
-            «Возможности» — только вручную через кнопку «В возможности» после AI-оценки
-            реализуемости и предварительной экономики с учётом поставщика.
+            AI сам ищет новые площадки под ваш товар, добавляет их в каталог и запоминает для
+            следующих поисков. Уже известные источники повторно не анализируются. Результаты
+            тендеров сохраняются здесь; перенос в «Возможности» — вручную после AI-оценки
+            реализуемости.
           </p>
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
             <div>
@@ -555,8 +558,8 @@ export default function MonitoringPage() {
             </div>
           ) : (
             <p style={{ marginTop: 12, color: "#64748b" }}>
-              Нет источников по фильтру каталога. Можно всё равно запустить поиск — будут проверены
-              общие ленты закупок.
+              Нет источников по точному совпадению тегов. Можно всё равно запустить поиск —
+              будут проверены общие ленты TED и World Bank.
             </p>
           )}
           {searchRun ? (
@@ -566,7 +569,7 @@ export default function MonitoringPage() {
               {searchRun.error_message ? ` · ошибка: ${searchRun.error_message}` : ""}
             </div>
           ) : null}
-          {searchHits.length > 0 ? (
+          {searchHits.filter((hit) => hit.status !== "SKIPPED" && hit.status !== "FILTERED_OUT").length > 0 ? (
             <div style={{ marginTop: 16 }}>
               <h3 style={{ marginTop: 0, fontSize: 16 }}>Результаты поиска тендеров</h3>
               <div style={{ overflowX: "auto" }}>
@@ -587,7 +590,7 @@ export default function MonitoringPage() {
                   </thead>
                   <tbody>
                     {searchHits
-                      .filter((hit) => hit.status !== "SKIPPED")
+                      .filter((hit) => hit.status !== "SKIPPED" && hit.status !== "FILTERED_OUT")
                       .map((hit) => (
                         <TenderResultRow
                           key={hit.id}
@@ -600,6 +603,11 @@ export default function MonitoringPage() {
                 </table>
               </div>
             </div>
+          ) : searchRun ? (
+            <p style={{ marginTop: 12, color: "#64748b" }}>
+              По запросу актуальных тендеров не найдено. Попробуйте расширить регион или
+              уточнить товар (например, «gum arabic», «guar gum»).
+            </p>
           ) : null}
         </div>
 

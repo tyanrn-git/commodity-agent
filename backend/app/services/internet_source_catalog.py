@@ -111,7 +111,35 @@ def match_internet_sources(
         matched.append((score, source))
 
     matched.sort(key=lambda item: (-item[0], item[1].name.lower()))
-    return [source for _, source in matched]
+    if matched or not keywords:
+        return [source for _, source in matched]
+
+    # Universal procurement feeds still apply when product is outside seeded tags.
+    fallback: list[tuple[int, InternetSource]] = []
+    for source in sources:
+        if not source.is_active and not include_inactive:
+            continue
+        if access_mode and source.access_mode != access_mode:
+            continue
+        if source.fetch_strategy not in {
+            InternetSourceFetchStrategy.TED_API.value,
+            InternetSourceFetchStrategy.WORLD_BANK_API.value,
+        }:
+            continue
+        if region_filters:
+            source_regions = [str(region).lower() for region in (source.regions or [])]
+            if not any(region == "global" for region in source_regions):
+                region_hits = sum(
+                    1
+                    for region in region_filters
+                    if any(region in source_region or source_region in region for source_region in source_regions)
+                )
+                if region_hits == 0:
+                    continue
+        fallback.append((source.priority, source))
+
+    fallback.sort(key=lambda item: (-item[0], item[1].name.lower()))
+    return [source for _, source in fallback]
 
 
 def get_internet_source(db: Session, *, user: User, source_id: uuid.UUID) -> InternetSource:
@@ -146,6 +174,8 @@ def create_internet_source(
         is_active=data.get("is_active", True),
         is_test=data.get("is_test", False),
         priority=int(data.get("priority", 50)),
+        fetch_strategy=data.get("fetch_strategy", InternetSourceFetchStrategy.HTML.value),
+        fetch_config=data.get("fetch_config") or {},
         last_verified_at=data.get("last_verified_at"),
     )
     db.add(source)
@@ -193,6 +223,8 @@ def update_internet_source(
         "is_active",
         "is_test",
         "priority",
+        "fetch_strategy",
+        "fetch_config",
     ):
         if field in data and data[field] is not None:
             setattr(source, field, data[field])
@@ -226,7 +258,10 @@ SYSTEM_INTERNET_SOURCES: list[dict] = [
         "access_mode": MonitoringAccessMode.PUBLIC.value,
         "fetch_strategy": InternetSourceFetchStrategy.TED_API.value,
         "regions": ["EU", "Europe"],
-        "product_tags": ["urea", "carbamide", "fertilizer", "chemicals", "карбамид"],
+        "product_tags": [
+            "urea", "carbamide", "fertilizer", "chemicals", "карбамид",
+            "commodities", "polymers", "gum", "guar gum", "procurement",
+        ],
         "languages": ["en"],
         "description": "Official EU TED Search API — real published procurement notices.",
         "search_hints": "Full-text search with publication date filter.",
@@ -240,7 +275,10 @@ SYSTEM_INTERNET_SOURCES: list[dict] = [
         "access_mode": MonitoringAccessMode.PUBLIC.value,
         "fetch_strategy": InternetSourceFetchStrategy.WORLD_BANK_API.value,
         "regions": ["Global", "Africa", "Asia"],
-        "product_tags": ["urea", "fertilizer", "carbamide", "карбамид"],
+        "product_tags": [
+            "urea", "fertilizer", "carbamide", "карбамид",
+            "commodities", "chemicals", "polymers", "gum", "guar gum", "procurement",
+        ],
         "languages": ["en"],
         "description": "World Bank open procurement notices API (fertilizer/urea-related bids).",
         "search_hints": "Search by qterm and filter by notice date.",
@@ -254,7 +292,10 @@ SYSTEM_INTERNET_SOURCES: list[dict] = [
         "access_mode": MonitoringAccessMode.PUBLIC.value,
         "fetch_strategy": InternetSourceFetchStrategy.HTML.value,
         "regions": ["India"],
-        "product_tags": ["urea", "carbamide", "fertilizer", "карбамид"],
+        "product_tags": [
+            "urea", "carbamide", "fertilizer", "карбамид",
+            "commodities", "chemicals", "polymers", "gum", "guar gum",
+        ],
         "languages": ["en"],
         "description": "Indian government eProcurement active tenders page.",
         "search_hints": "Parse active tenders list for fertilizer/urea keywords.",
@@ -298,7 +339,7 @@ SYSTEM_INTERNET_SOURCES: list[dict] = [
         "access_mode": MonitoringAccessMode.PUBLIC.value,
         "fetch_strategy": InternetSourceFetchStrategy.HTML.value,
         "regions": ["Global"],
-        "product_tags": ["urea", "fertilizer", "chemicals"],
+        "product_tags": ["urea", "fertilizer", "chemicals", "commodities", "polymers", "gum", "procurement"],
         "languages": ["en"],
         "description": "UNGM public notices — HTML keyword extraction.",
         "search_hints": "Open procurement notices for chemicals/fertilizers.",

@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.api.schemas_internet_sources import (
     InternetSourceCreate,
+    InternetSourceDiscoverRequest,
+    InternetSourceDiscoverResponse,
     InternetSourceMatchResponse,
     InternetSourceResponse,
     InternetSourceSearchHitResponse,
@@ -24,6 +26,7 @@ from app.services.internet_source_catalog import (
     update_internet_source,
 )
 from app.services.product_keyword_localization import expand_product_keywords
+from app.services.internet_source_discovery import discover_and_register_sources
 from app.services.internet_source_search import (
     get_search_run,
     list_search_hits,
@@ -72,11 +75,25 @@ def match_internet_sources_route(
     regions: str | None = Query(default=None, description="Comma-separated regions"),
     access_mode: str | None = Query(default=None),
     include_inactive: bool = Query(default=False),
+    auto_discover: bool = Query(default=True),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     keywords = _parse_csv(product_keywords) or []
     region_list = _parse_csv(regions) or []
+    sources_discovered = 0
+    discovery_notes: str | None = None
+    if keywords and auto_discover:
+        discovery = discover_and_register_sources(
+            db,
+            user=current_user,
+            product_keywords=keywords,
+            regions=region_list,
+            access_mode=access_mode,
+        )
+        sources_discovered = len(discovery.added_sources)
+        discovery_notes = discovery.ai_notes
+
     expanded_keywords = expand_product_keywords(db, keywords) if keywords else []
     sources = list_internet_sources(
         db,
@@ -96,6 +113,33 @@ def match_internet_sources_route(
         matched_count=len(matched),
         product_keywords=keywords,
         regions=region_list,
+        sources_discovered=sources_discovered,
+        discovery_notes=discovery_notes,
+    )
+
+
+@router.post("/discover", response_model=InternetSourceDiscoverResponse)
+def discover_internet_sources(
+    payload: InternetSourceDiscoverRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    discovery = discover_and_register_sources(
+        db,
+        user=current_user,
+        product_keywords=payload.product_keywords,
+        regions=payload.regions,
+        access_mode=payload.access_mode,
+        force=payload.force,
+    )
+    return InternetSourceDiscoverResponse(
+        added_sources=[InternetSourceResponse.from_model(source) for source in discovery.added_sources],
+        added_count=len(discovery.added_sources),
+        skipped_existing=discovery.skipped_existing,
+        skipped_discovery=discovery.skipped_discovery,
+        discovery_notes=discovery.ai_notes,
+        product_keywords=payload.product_keywords,
+        regions=payload.regions,
     )
 
 
@@ -105,7 +149,7 @@ def post_internet_source_search(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return run_internet_source_search(
+    run, sources_discovered = run_internet_source_search(
         db,
         user=current_user,
         product_keywords=payload.product_keywords,
@@ -114,7 +158,10 @@ def post_internet_source_search(
         access_mode=payload.access_mode,
         max_sources=payload.max_sources,
         verify_real=payload.verify_real,
+        auto_discover_sources=payload.auto_discover_sources,
     )
+    response = InternetSourceSearchRunResponse.model_validate(run)
+    return response.model_copy(update={"sources_discovered": sources_discovered})
 
 
 @router.get("/search/runs", response_model=list[InternetSourceSearchRunResponse])

@@ -87,9 +87,22 @@ COMMODITY_TERM_GROUPS: list[dict[str, list[str]]] = [
         "tr": ["fosfat gübresi", "potasyum gübresi"],
         "zh": ["磷肥", "钾肥"],
     },
+    {
+        "en": ["gum arabic", "guar gum", "acacia gum", "xanthan gum", "gum resin"],
+        "ru": ["камедь", "гуаровая камедь", "арабская камедь", "гуммиарабик", "ксантановая камедь", "смола"],
+        "es": ["goma", "goma arábiga", "goma de guar", "goma de acacia", "resina"],
+        "fr": ["gomme", "gomme arabique", "gomme de guar", "gomme d'acacia", "résine"],
+        "ar": ["صمغ", "صمغ عربي", "صمغ الغوار"],
+        "hi": ["गम", "गोंद", "ग्वार गम", "अरबिक गम"],
+        "pt": ["goma", "goma arábica", "goma de guar", "resina"],
+        "de": ["gummi", "gummi arabicum", "guarkernmehl", "harz"],
+        "tr": ["sakız", "akasya sakızı", "guar sakızı", "reçine"],
+        "zh": ["胶", "阿拉伯胶", "瓜尔胶", "树脂"],
+    },
 ]
 
 TERM_LANGUAGE_INDEX: dict[str, set[str]] = {}
+GENERIC_SOURCE_TAGS = {"commodities", "chemicals", "polymers", "procurement", "food ingredients"}
 for group in COMMODITY_TERM_GROUPS:
     for language, terms in group.items():
         for term in terms:
@@ -208,6 +221,10 @@ def source_keyword_matches(keyword: str, source: InternetSource) -> bool:
     for tag in source.product_tags or []:
         if terms_semantically_related(keyword, str(tag)):
             return True
+    if _find_groups_for_term(keyword) and any(
+        str(tag).strip().lower() in GENERIC_SOURCE_TAGS for tag in (source.product_tags or [])
+    ):
+        return True
     return False
 
 

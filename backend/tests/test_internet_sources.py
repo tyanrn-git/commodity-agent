@@ -1,6 +1,14 @@
 import pytest
 
+from app.config import settings
+
 pytestmark = pytest.mark.usefixtures("setup_database")
+
+
+@pytest.fixture(autouse=True)
+def use_mock_ai(monkeypatch):
+    monkeypatch.setattr(settings, "ai_provider", "mock")
+    monkeypatch.setattr(settings, "openai_api_key", "")
 
 
 def test_list_system_internet_sources(auth_client):
@@ -30,6 +38,17 @@ def test_match_urea_sources(auth_client):
     assert data["matched_count"] >= 2
     names = [source["name"] for source in data["sources"]]
     assert "World Bank Procurement" in names
+
+
+def test_match_guar_gum_sources_russian_keyword(auth_client):
+    response = auth_client.get(
+        "/internet-sources/match?product_keywords=гуаровая%20камедь&regions=India,EU,Global"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["matched_count"] >= 1
+    names = [source["name"] for source in data["sources"]]
+    assert "TED — EU Notices API" in names or "World Bank Procurement" in names
 
 
 def test_create_user_internet_source(auth_client):

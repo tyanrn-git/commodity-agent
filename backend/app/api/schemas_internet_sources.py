@@ -72,6 +72,25 @@ class InternetSourceMatchResponse(BaseModel):
     matched_count: int
     product_keywords: list[str]
     regions: list[str]
+    sources_discovered: int = 0
+    discovery_notes: str | None = None
+
+
+class InternetSourceDiscoverRequest(BaseModel):
+    product_keywords: list[str] = Field(min_length=1)
+    regions: list[str] = Field(default_factory=list)
+    access_mode: str = "PUBLIC"
+    force: bool = False
+
+
+class InternetSourceDiscoverResponse(BaseModel):
+    added_sources: list[InternetSourceResponse]
+    added_count: int
+    skipped_existing: int
+    skipped_discovery: bool
+    discovery_notes: str | None = None
+    product_keywords: list[str]
+    regions: list[str]
 
 
 class InternetSourceSearchRequest(BaseModel):
@@ -81,6 +100,7 @@ class InternetSourceSearchRequest(BaseModel):
     access_mode: str = "PUBLIC"
     max_sources: int = Field(default=6, ge=1, le=12)
     verify_real: bool = True
+    auto_discover_sources: bool = True
 
 
 class InternetSourceSearchRunResponse(BaseModel):
@@ -104,6 +124,7 @@ class InternetSourceSearchRunResponse(BaseModel):
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    sources_discovered: int = 0
 
 
 class TenderMonitoringRow(BaseModel):
