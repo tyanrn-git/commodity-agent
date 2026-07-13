@@ -47,10 +47,12 @@ function TenderResultRow({
   hit,
   onPromote,
   promoting,
+  catalogProductId,
 }: {
   hit: InternetSourceSearchHit;
   onPromote: (hitId: string) => Promise<void>;
   promoting: boolean;
+  catalogProductId?: string | null;
 }) {
   const row: TenderMonitoringRow =
     hit.monitoring_row ?? {
@@ -76,6 +78,10 @@ function TenderResultRow({
     gross_margin_percent?: number;
     margin_currency?: string;
   } | null;
+  const catalogParamsAdded =
+    typeof hit.extracted_fields?.catalog_params_added === "number"
+      ? hit.extracted_fields.catalog_params_added
+      : 0;
   const canPromote =
     row.product_match &&
     !row.submission_expired &&
@@ -108,7 +114,17 @@ function TenderResultRow({
         ) : null}
       </td>
       <td style={tdStyle}>{row.buyer_name || "—"}</td>
-      <td style={tdStyle}>{row.product_name || "—"}</td>
+      <td style={tdStyle}>
+        {row.product_name || "—"}
+        {catalogParamsAdded > 0 && catalogProductId ? (
+          <div style={{ fontSize: 11, color: "#166534", marginTop: 4 }}>
+            +{catalogParamsAdded} в{" "}
+            <Link href={`/products/${catalogProductId}`} style={styles.link}>
+              каталоге
+            </Link>
+          </div>
+        ) : null}
+      </td>
       <td style={tdStyle}>{row.volume || "—"}</td>
       <td style={tdStyle}>{row.estimated_value || "—"}</td>
       <td style={tdStyle}>
@@ -162,6 +178,40 @@ function TenderResultRow({
         ) : null}
       </td>
     </tr>
+  );
+}
+
+function SearchRunProductBanner({ run }: { run: InternetSourceSearchRun }) {
+  if (!run.product_id) return null;
+  const label = run.product_name || "Товар в каталоге";
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "12px 14px",
+        borderRadius: 8,
+        background: "#ecfdf5",
+        border: "1px solid #bbf7d0",
+        fontSize: 14,
+        color: "#166534",
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>
+        Каталог:{" "}
+        <Link href={`/products/${run.product_id}`} style={{ ...styles.link, color: "#166534" }}>
+          {label}
+        </Link>
+      </div>
+      {run.catalog_specs_added > 0 ? (
+        <div style={{ marginTop: 6, fontSize: 13 }}>
+          Из тендеров добавлено или уточнено параметров: {run.catalog_specs_added}
+        </div>
+      ) : (
+        <div style={{ marginTop: 6, fontSize: 13, color: "#15803d" }}>
+          Поиск привязан к карточке товара — спеки обновятся при совпадении с тендерами.
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -460,7 +510,9 @@ export default function MonitoringPage() {
       setMessage(
         `Поиск: ${run.status} · источников ${run.sources_scanned}/${run.sources_matched} · ` +
           `найдено ${run.hits_found} · перенесено в возможности ${run.opportunities_created}` +
-          (run.sources_discovered ? ` · AI добавил площадок ${run.sources_discovered}` : "")
+          (run.sources_discovered ? ` · AI добавил площадок ${run.sources_discovered}` : "") +
+          (run.product_name ? ` · каталог: ${run.product_name}` : "") +
+          (run.catalog_specs_added ? ` · спеки +${run.catalog_specs_added}` : "")
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка AI-поиска");
@@ -688,10 +740,13 @@ export default function MonitoringPage() {
             </p>
           )}
           {searchRun ? (
-            <div style={{ marginTop: 16, fontSize: 14, color: "#475569" }}>
-              Последний поиск: {searchRun.status} · AI-вызовов {searchRun.ai_calls} · найдено{" "}
-              {searchRun.hits_found} · перенесено в возможности {searchRun.opportunities_created}
-              {searchRun.error_message ? ` · ошибка: ${searchRun.error_message}` : ""}
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 14, color: "#475569" }}>
+                Последний поиск: {searchRun.status} · AI-вызовов {searchRun.ai_calls} · найдено{" "}
+                {searchRun.hits_found} · перенесено в возможности {searchRun.opportunities_created}
+                {searchRun.error_message ? ` · ошибка: ${searchRun.error_message}` : ""}
+              </div>
+              <SearchRunProductBanner run={searchRun} />
             </div>
           ) : null}
           {searchHits.filter((hit) => hit.status !== "SKIPPED" && hit.status !== "FILTERED_OUT").length > 0 ? (
@@ -723,6 +778,7 @@ export default function MonitoringPage() {
                           hit={hit}
                           promoting={promotingHitId === hit.id}
                           onPromote={onPromoteHit}
+                          catalogProductId={searchRun?.product_id}
                         />
                       ))}
                   </tbody>

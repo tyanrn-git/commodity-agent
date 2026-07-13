@@ -170,8 +170,8 @@ def post_internet_source_search(
         verify_real=payload.verify_real,
         auto_discover_sources=payload.auto_discover_sources,
     )
-    response = InternetSourceSearchRunResponse.model_validate(run)
-    return response.model_copy(update={"sources_discovered": sources_discovered})
+    run = get_search_run(db, user=current_user, run_id=run.id)
+    return InternetSourceSearchRunResponse.from_run(run, sources_discovered=sources_discovered)
 
 
 @router.get("/search/runs", response_model=list[InternetSourceSearchRunResponse])
@@ -179,7 +179,8 @@ def get_internet_source_search_runs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return list_search_runs(db, user=current_user)
+    runs = list_search_runs(db, user=current_user)
+    return [InternetSourceSearchRunResponse.from_run(run) for run in runs]
 
 
 @router.get("/search/runs/{run_id}", response_model=InternetSourceSearchRunResponse)
@@ -188,7 +189,8 @@ def get_internet_source_search_run(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return get_search_run(db, user=current_user, run_id=run_id)
+    run = get_search_run(db, user=current_user, run_id=run_id)
+    return InternetSourceSearchRunResponse.from_run(run)
 
 
 @router.get("/search/runs/{run_id}/hits", response_model=list[InternetSourceSearchHitResponse])

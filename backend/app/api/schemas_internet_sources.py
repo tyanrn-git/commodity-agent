@@ -121,12 +121,30 @@ class InternetSourceSearchRunResponse(BaseModel):
     hits_new: int
     opportunities_created: int
     ai_calls: int
+    catalog_specs_added: int = 0
     error_message: str | None
     started_at: datetime
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
     sources_discovered: int = 0
+    product_name: str | None = None
+
+    @classmethod
+    def from_run(
+        cls,
+        run,
+        *,
+        sources_discovered: int = 0,
+    ) -> "InternetSourceSearchRunResponse":
+        product_name = run.product.normalized_name if getattr(run, "product", None) else None
+        data = cls.model_validate(run)
+        return data.model_copy(
+            update={
+                "sources_discovered": sources_discovered,
+                "product_name": product_name,
+            }
+        )
 
 
 class TenderMonitoringRow(BaseModel):

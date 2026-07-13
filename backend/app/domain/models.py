@@ -1125,6 +1125,7 @@ class InternetSourceSearchRun(Base, TimestampMixin):
     product_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    catalog_specs_added: Mapped[int] = mapped_column(nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="RUNNING", index=True)
     sources_matched: Mapped[int] = mapped_column(nullable=False, default=0)
     sources_scanned: Mapped[int] = mapped_column(nullable=False, default=0)

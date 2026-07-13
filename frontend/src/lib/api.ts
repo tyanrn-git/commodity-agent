@@ -622,6 +622,8 @@ export type InternetSourceMatch = {
 export type InternetSourceSearchRun = {
   id: string;
   owner_id: string;
+  product_id: string | null;
+  product_name: string | null;
   product_keywords: string[];
   regions: string[];
   search_date: string;
@@ -633,6 +635,7 @@ export type InternetSourceSearchRun = {
   hits_new: number;
   opportunities_created: number;
   ai_calls: number;
+  catalog_specs_added: number;
   error_message: string | null;
   started_at: string;
   finished_at: string | null;

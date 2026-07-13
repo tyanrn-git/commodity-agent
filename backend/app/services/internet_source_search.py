@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.ai.factory import get_ai_provider
 from app.ai.schemas import TenderSearchHitOutput, TenderSearchOutput
@@ -395,7 +395,9 @@ def _build_user_prompt(
 
 def get_search_run(db: Session, *, user: User, run_id: uuid.UUID) -> InternetSourceSearchRun:
     run = db.scalar(
-        select(InternetSourceSearchRun).where(
+        select(InternetSourceSearchRun)
+        .options(joinedload(InternetSourceSearchRun.product))
+        .where(
             InternetSourceSearchRun.id == run_id,
             InternetSourceSearchRun.owner_id == user.id,
         )
@@ -409,6 +411,7 @@ def list_search_runs(db: Session, *, user: User, limit: int = 20) -> list[Intern
     return list(
         db.scalars(
             select(InternetSourceSearchRun)
+            .options(joinedload(InternetSourceSearchRun.product))
             .where(InternetSourceSearchRun.owner_id == user.id)
             .order_by(InternetSourceSearchRun.started_at.desc())
             .limit(limit)
@@ -652,7 +655,7 @@ def run_internet_source_search(
                     select(InternetSourceSearchHit).where(InternetSourceSearchHit.search_run_id == run.id)
                 )
             )
-            enrich_product_from_search_hits(
+            run.catalog_specs_added = enrich_product_from_search_hits(
                 db,
                 user=user,
                 product_id=run.product_id,

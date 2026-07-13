@@ -162,5 +162,12 @@ def enrich_product_from_search_hits(
             source_text=source_text,
             rough_product_name=fields.get("product") or product.normalized_name,
         )
-        parameters_added += int(result.get("parameters_added") or 0)
+        added = int(result.get("parameters_added") or 0)
+        if added > 0:
+            updated_fields = dict(fields)
+            updated_fields["catalog_params_added"] = added
+            hit.extracted_fields = updated_fields
+            db.flush()
+        parameters_added += added
+    db.commit()
     return parameters_added
