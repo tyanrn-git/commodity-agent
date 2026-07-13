@@ -30,14 +30,17 @@ def _normalize_tags(values: list[str] | None) -> list[str]:
 
 
 REGION_ALIAS_GROUPS: list[frozenset[str]] = [
-    frozenset({"russia", "россия", "ru", "rf", "cis", "eaeu", "eurasia"}),
-    frozenset({"eu", "europe", "европа", "european union"}),
-    frozenset({"india", "индия", "in"}),
-    frozenset({"china", "китай", "cn"}),
     frozenset({"global", "world", "international", "глобальный"}),
-    frozenset({"africa", "африка"}),
-    frozenset({"asia", "азия"}),
-    frozenset({"usa", "us", "united states", "сша"}),
+    frozenset({"cis", "снг", "eaeu", "eurasia", "russia", "россия", "ru", "rf", "belarus", "kazakhstan", "uzbekistan", "armenia", "azerbaijan", "kyrgyzstan", "georgia"}),
+    frozenset({"europe", "eu", "европа", "european union", "uk", "united kingdom", "turkey", "norway", "switzerland", "ukraine"}),
+    frozenset({"middle east", "mena", "uae", "saudi arabia", "qatar", "kuwait", "oman", "iran", "israel"}),
+    frozenset({"south asia", "india", "индия", "in", "pakistan", "bangladesh", "sri lanka"}),
+    frozenset({"east asia", "china", "китай", "cn", "japan", "south korea"}),
+    frozenset({"southeast asia", "asean", "vietnam", "indonesia", "thailand", "malaysia", "singapore"}),
+    frozenset({"africa", "африка", "nigeria", "south africa", "egypt", "kenya", "morocco", "ethiopia"}),
+    frozenset({"north america", "usa", "us", "united states", "сша", "canada", "mexico"}),
+    frozenset({"latin america", "latam", "brazil", "argentina", "chile", "colombia", "peru"}),
+    frozenset({"oceania", "australia", "new zealand"}),
 ]
 
 _GLOBAL_REGION_TOKENS = frozenset({"global", "world", "international", "глобальный"})

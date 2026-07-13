@@ -15,6 +15,8 @@ import {
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/opportunityStatus";
 import { AppNav } from "@/components/AppNav";
+import { RegionPicker } from "@/components/RegionPicker";
+import { parseRegionsInput, regionsToQuery } from "@/lib/regions";
 import { styles } from "@/lib/styles";
 
 const ACCESS_MODE_LABELS: Record<string, string> = {
@@ -328,7 +330,9 @@ export default function MonitoringPage() {
   const [error, setError] = useState("");
 
   const [catalogProductFilter, setCatalogProductFilter] = useState("urea, карбамид");
-  const [catalogRegionFilter, setCatalogRegionFilter] = useState("India, EU, Global");
+  const [selectedRegions, setSelectedRegions] = useState<string[]>(() =>
+    parseRegionsInput("India, EU, Global")
+  );
   const [catalogAccessFilter, setCatalogAccessFilter] = useState("");
   const [showInactiveSources, setShowInactiveSources] = useState(false);
   const [togglingSourceId, setTogglingSourceId] = useState<string | null>(null);
@@ -336,7 +340,7 @@ export default function MonitoringPage() {
   const [newSourceName, setNewSourceName] = useState("");
   const [newSourceUrl, setNewSourceUrl] = useState("");
   const [newSourceTags, setNewSourceTags] = useState("urea, карбамид");
-  const [newSourceRegions, setNewSourceRegions] = useState("India");
+  const [newSourceRegions, setNewSourceRegions] = useState<string[]>(() => parseRegionsInput("India"));
   const [newSourceHints, setNewSourceHints] = useState("");
   const [newSourceAccessMode, setNewSourceAccessMode] = useState("PUBLIC");
   const [newSourcePlatformName, setNewSourcePlatformName] = useState("");
@@ -357,7 +361,7 @@ export default function MonitoringPage() {
   async function loadCatalog() {
     const match = await apiClient.matchInternetSources({
       product_keywords: catalogProductFilter,
-      regions: catalogRegionFilter,
+      regions: regionsToQuery(selectedRegions),
       access_mode: catalogAccessFilter || undefined,
       include_inactive: showInactiveSources,
     });
@@ -392,7 +396,7 @@ export default function MonitoringPage() {
       setCatalogProductFilter(lastRun.product_keywords.join(", "));
     }
     if (lastRun.regions?.length) {
-      setCatalogRegionFilter(lastRun.regions.join(", "));
+      setSelectedRegions(parseRegionsInput(lastRun.regions));
     }
     if (lastRun.access_mode) {
       setCatalogAccessFilter(lastRun.access_mode);
@@ -433,7 +437,7 @@ export default function MonitoringPage() {
       loadCatalog().catch(() => setError("Ошибка загрузки каталога"));
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [catalogProductFilter, catalogRegionFilter, catalogAccessFilter, showInactiveSources]);
+  }, [catalogProductFilter, regionsToQuery(selectedRegions), catalogAccessFilter, showInactiveSources]);
 
   async function onRunAiSearch() {
     setSearchLoading(true);
@@ -446,10 +450,7 @@ export default function MonitoringPage() {
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
-        regions: catalogRegionFilter
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean),
+        regions: selectedRegions,
         access_mode: catalogAccessFilter || "PUBLIC",
         verify_real: true,
       });
@@ -516,10 +517,7 @@ export default function MonitoringPage() {
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
-        regions: newSourceRegions
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean),
+        regions: newSourceRegions.length ? newSourceRegions : ["Global"],
         search_hints: newSourceHints.trim() || null,
         is_test: newSourceIsTest,
         is_active: !newSourceIsTest,
@@ -625,16 +623,7 @@ export default function MonitoringPage() {
               />
             </div>
             <div>
-              <label style={styles.label}>Регион</label>
-              <input
-                style={styles.input}
-                value={catalogRegionFilter}
-                onChange={(e) => setCatalogRegionFilter(e.target.value)}
-                placeholder="Russia, EU, Global"
-              />
-              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
-                Список источников обновляется автоматически при смене региона
-              </div>
+              <RegionPicker value={selectedRegions} onChange={setSelectedRegions} />
             </div>
             <div>
               <label style={styles.label}>Доступ (фильтр)</label>
@@ -819,8 +808,7 @@ export default function MonitoringPage() {
             ) : null}
             <label style={styles.label}>Товары (через запятую)</label>
             <input style={styles.input} value={newSourceTags} onChange={(e) => setNewSourceTags(e.target.value)} />
-            <label style={styles.label}>Регионы (через запятую)</label>
-            <input style={styles.input} value={newSourceRegions} onChange={(e) => setNewSourceRegions(e.target.value)} />
+            <RegionPicker value={newSourceRegions} onChange={setNewSourceRegions} />
             <label style={styles.label}>Подсказка для AI-поиска</label>
             <textarea
               style={{ ...styles.input, minHeight: 64, resize: "vertical" }}
