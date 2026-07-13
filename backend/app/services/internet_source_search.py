@@ -57,7 +57,7 @@ Rules:
 - Do not invent tenders without explicit supporting text in the page content.
 """
 
-MAX_SOURCES_PER_RUN = 6
+MAX_SOURCES_PER_RUN = 8
 MAX_PAGE_CHARS = 28000
 
 
@@ -213,6 +213,7 @@ def _persist_hits(
     fetch_status: str,
     reference_date: datetime,
     seen_hashes: set[str],
+    region_filters: list[str] | None = None,
     ai_notes: str | None = None,
     visited_urls: list[str] | None = None,
 ) -> tuple[int, int, int]:
@@ -230,6 +231,7 @@ def _persist_hits(
             item,
             user_keywords=user_keywords,
             reference_date=reference_date,
+            region_filters=region_filters,
         )
         status_value = _hit_status_from_evaluation(evaluation)
         if status_value == InternetSourceSearchHitStatus.FILTERED_OUT.value:
@@ -272,6 +274,8 @@ def _persist_hits(
                     "deadline_known": evaluation.deadline_known,
                     "product_match": evaluation.product_match,
                     "product_match_reason": evaluation.product_match_reason,
+                    "region_match": evaluation.region_match,
+                    "region_match_reason": evaluation.region_match_reason,
                     "display_status": evaluation.display_status,
                     "display_status_label": evaluation.display_status_label,
                     "body": item.body,
@@ -317,7 +321,7 @@ def _collect_source_hits(
             result = get_ted_search_provider().search_notices(
                 keywords=keywords,
                 search_date=search_date,
-                limit=8,
+                limit=12,
             )
             if result.hits:
                 return SourceHitCollection(result.hits, result.status, None, False)
@@ -329,7 +333,7 @@ def _collect_source_hits(
 
     if strategy == InternetSourceFetchStrategy.WORLD_BANK_API.value:
         try:
-            hits, status = search_world_bank_notices(keywords=keywords, search_date=search_date, limit=8)
+            hits, status = search_world_bank_notices(keywords=keywords, search_date=search_date, limit=12)
             return SourceHitCollection(hits, status, None, False)
         except Exception as exc:
             return SourceHitCollection([], "FAILED", str(exc), False)
@@ -587,6 +591,7 @@ def run_internet_source_search(
                 user_keywords=keywords,
                 fetch_status=fetch_status,
                 reference_date=target_date,
+                region_filters=region_list or None,
                 seen_hashes=seen_hashes,
                 ai_notes=ai_notes,
                 visited_urls=visited_urls,

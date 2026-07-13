@@ -79,7 +79,7 @@ def test_match_russia_prefers_russian_sources(auth_client):
     data = response.json()
     names = [source["name"] for source in data["sources"]]
     assert "ЕИС Закупки (zakupki.gov.ru)" in names
-    assert "TED — EU Notices API" not in names
+    assert "TED — EU Notices API" in names
 
 
 def test_create_user_internet_source(auth_client):

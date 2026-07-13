@@ -672,9 +672,10 @@ export default function MonitoringPage() {
           {sources.length > 0 ? (
             <div style={{ marginTop: 16 }}>
               <h3 style={{ marginTop: 0, fontSize: 16 }}>Открытые источники</h3>
-              <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
-                Система опрашивает автоматически — TED API, World Bank и публичные порталы.
-              </p>
+            <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
+              Система опрашивает автоматически — TED API и World Bank ищут по товару по всему
+              миру; ниже — площадки выбранного региона.
+            </p>
               <SourceCatalogTable
                 sources={publicSources}
                 togglingSourceId={togglingSourceId}
@@ -741,8 +742,9 @@ export default function MonitoringPage() {
             </div>
           ) : searchRun ? (
             <p style={{ marginTop: 12, color: "#64748b" }}>
-              По запросу актуальных тендеров не найдено. Проверьте, что в списке есть TED — EU
-              Notices API, и попробуйте английские синонимы (transformer oil, insulating oil).
+              По запросу актуальных тендеров не найдено. TED и World Bank ищут по товару
+              глобально; российские площадки (zakupki, roseltorg) могут быть недоступны с
+              сервера — попробуйте также регион «EU, Global».
             </p>
           ) : null}
         </div>

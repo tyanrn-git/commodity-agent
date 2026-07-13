@@ -83,3 +83,34 @@ def test_match_russia_excludes_eu_portals_with_global_tag():
     names = [source.name for source in matched]
     assert "Zakupki" in names
     assert "EEX" not in names
+
+
+def test_universal_api_feeds_included_for_any_region():
+    sources = [
+        InternetSource(
+            name="TED — EU Notices API",
+            base_url="https://api.ted.europa.eu/v3/notices/search",
+            regions=["EU"],
+            fetch_strategy=InternetSourceFetchStrategy.TED_API.value,
+            product_tags=["procurement"],
+            is_active=True,
+            priority=95,
+        ),
+        InternetSource(
+            name="World Bank Procurement",
+            base_url="https://search.worldbank.org/api/v2/procnotices",
+            regions=["Global"],
+            fetch_strategy=InternetSourceFetchStrategy.WORLD_BANK_API.value,
+            product_tags=["procurement"],
+            is_active=True,
+            priority=90,
+        ),
+    ]
+    matched = match_internet_sources(
+        sources,
+        product_keywords=["transformer oil"],
+        regions=["Russia"],
+    )
+    names = [source.name for source in matched]
+    assert "TED — EU Notices API" in names
+    assert "World Bank Procurement" in names

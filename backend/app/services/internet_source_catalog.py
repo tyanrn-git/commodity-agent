@@ -160,7 +160,6 @@ def match_internet_sources(
     if keywords:
         universal_feeds = _collect_universal_api_feeds(
             sources,
-            region_filters=region_filters,
             access_mode=access_mode,
             include_inactive=include_inactive,
         )
@@ -174,10 +173,10 @@ def match_internet_sources(
 def _collect_universal_api_feeds(
     sources: list[InternetSource],
     *,
-    region_filters: list[str],
     access_mode: str | None,
     include_inactive: bool,
 ) -> list[InternetSource]:
+    """Product-wide procurement APIs — always searched regardless of region filter."""
     universal_strategies = {
         InternetSourceFetchStrategy.TED_API.value,
         InternetSourceFetchStrategy.WORLD_BANK_API.value,
@@ -189,8 +188,6 @@ def _collect_universal_api_feeds(
         if access_mode and source.access_mode != access_mode:
             continue
         if source.fetch_strategy not in universal_strategies:
-            continue
-        if region_filters and not _source_region_matches(source, region_filters):
             continue
         feeds.append(source)
     feeds.sort(key=lambda item: (-item.priority, item.name.lower()))
@@ -356,6 +353,22 @@ SYSTEM_INTERNET_SOURCES: list[dict] = [
         "description": "Единая информационная система закупок РФ — поиск извещений по 44-ФЗ и 223-ФЗ.",
         "search_hints": "https://zakupki.gov.ru/epz/order/extendedsearch/search.html — фильтр по наименованию объекта закупки.",
         "priority": 92,
+        "is_active": True,
+    },
+    {
+        "name": "Росэлторг (roseltorg.ru)",
+        "base_url": "https://www.roseltorg.ru/",
+        "source_kind": InternetSourceKind.TENDER_PORTAL.value,
+        "access_mode": MonitoringAccessMode.PUBLIC.value,
+        "fetch_strategy": InternetSourceFetchStrategy.HTML.value,
+        "regions": ["Russia", "CIS"],
+        "product_tags": [
+            "chemicals", "commodities", "oil", "transformer oil", "трансформаторное масло", "procurement",
+        ],
+        "languages": ["ru"],
+        "description": "Крупнейшая электронная торговая площадка РФ.",
+        "search_hints": "https://www.roseltorg.ru/procedures — поиск процедур по наименованию лота.",
+        "priority": 88,
         "is_active": True,
     },
     {

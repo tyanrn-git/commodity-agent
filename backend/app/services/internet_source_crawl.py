@@ -9,7 +9,14 @@ from bs4 import BeautifulSoup
 
 from app.domain.models import InternetSource
 
-DEFAULT_HEADERS = {"User-Agent": "CommodityAgent/1.0"}
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/json,*/*;q=0.9",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+}
 
 TENDER_PATH_KEYWORDS = (
     "tender",
@@ -162,7 +169,7 @@ def _html_to_text(html: str) -> str:
 
 def _fetch_page(url: str) -> tuple[VisitedPage, str | None]:
     try:
-        with httpx.Client(timeout=10.0, follow_redirects=True, headers=DEFAULT_HEADERS) as client:
+        with httpx.Client(timeout=22.0, follow_redirects=True, headers=DEFAULT_HEADERS) as client:
             response = client.get(url)
             response.raise_for_status()
             content_type = response.headers.get("content-type", "")
