@@ -57,6 +57,36 @@ export type ProductDetail = Product & {
   updated_at: string;
 };
 
+export type AgentRunItem = {
+  id: string;
+  agent_task_id: string;
+  provider: string;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost: number;
+  status: string;
+  error: string | null;
+};
+
+export type AgentResultItem = {
+  id: string;
+  result_type: string;
+  summary: string | null;
+  confidence: number | null;
+  requires_review: boolean;
+};
+
+export type AgentActivityItem = {
+  id: string;
+  agent_type: string;
+  task_type: string;
+  status: string;
+  created_at: string;
+  runs: AgentRunItem[];
+  results: AgentResultItem[];
+};
+
 export type ProposedProduct = {
   normalized_name: string;
   category: string;
@@ -851,6 +881,10 @@ export const apiClient = {
     api<OpportunityStatusEvent[]>(`/opportunities/${id}/status-history`),
   getOpportunityDisplayStatus: (id: string) =>
     api<OpportunityDisplayStatus>(`/opportunities/${id}/display-status`),
+  getOpportunityAgentActivity: (id: string) =>
+    api<AgentActivityItem[]>(`/opportunities/${id}/agent-activity`),
+  listAgentCapabilities: () =>
+    api<Array<{ agent_type: string; label: string; description: string }>>("/agent-capabilities"),
   uploadSource: (id: string, file: File) => {
     const form = new FormData();
     form.append("file", file);

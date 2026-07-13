@@ -8,14 +8,15 @@ from sqlalchemy.orm import Session
 from app.ai.factory import get_ai_provider
 from app.ai.schemas import ProductResolutionOutput
 from app.config import settings
-from app.domain.enums import AIUsageOperation, AuditAction, SpecValueStatus
+from app.domain.enums import AIUsageOperation, AuditAction, SpecValueStatus, AgentResultType, AgentType
 from app.domain.models import Opportunity, OpportunitySpecValue, Product, ProductSpecificationProfile, User
 from app.integrations.storage.base import ObjectStorage
-from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings, log_ai_usage
+from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings
 from app.services.audit import log_audit
 from app.services.extraction import _get_source_text
 from app.services.product_assistant import auto_enrich_product_from_text
 from app.services.product_catalog import create_product_from_proposal, merge_discovered_specs
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 
 PRODUCT_MATCH_CONFIDENCE_THRESHOLD = 0.5
 
@@ -117,23 +118,41 @@ def resolve_opportunity_product(
 
     provider = get_ai_provider()
     model = budget_settings.preferred_default_model or settings.openai_default_model
-    output, usage = provider.structured_completion(
-        model=model,
-        system_prompt=PRODUCT_RESOLUTION_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        output_schema=ProductResolutionOutput,
-    )
-
-    log_ai_usage(
+    with tracked_agent_run(
         db,
         user=user,
-        operation=AIUsageOperation.MATCHING.value,
-        model=usage.model,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cost_usd=usage.cost_usd,
-        opportunity_id=opportunity.id,
-    )
+        context=AgentExecutionContext(
+            agent_type=AgentType.PRODUCT_MATCHING.value,
+            task_type="product_resolution",
+            opportunity_id=opportunity.id,
+            input_payload={
+                "rough_product_name": rough_product_name,
+                "create_if_missing": create_if_missing,
+            },
+        ),
+    ) as agent:
+        output, usage = provider.structured_completion(
+            model=model,
+            system_prompt=PRODUCT_RESOLUTION_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            output_schema=ProductResolutionOutput,
+        )
+        agent.attach_ai_usage(
+            model=usage.model,
+            operation=AIUsageOperation.MATCHING.value,
+            cost_usd=usage.cost_usd,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            opportunity_id=opportunity.id,
+        )
+        agent.record_result(
+            result_type=AgentResultType.PRODUCT_RESOLUTION.value,
+            structured_payload=output.model_dump(mode="json"),
+            summary=output.reasoning,
+            confidence=float(output.confidence),
+            requires_review=output.confidence < PRODUCT_MATCH_CONFIDENCE_THRESHOLD,
+            applied=False,
+        )
 
     product_id = _resolve_product_id(db, output)
     product_created = False

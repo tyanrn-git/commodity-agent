@@ -579,6 +579,7 @@ def run_internet_source_search(
                     provider=provider,
                     model=model,
                     verify_real=verify_real,
+                    internet_source_search_run_id=run.id,
                 )
                 ai_calls += enrich_calls
 

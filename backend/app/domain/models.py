@@ -177,6 +177,7 @@ class Opportunity(Base, TimestampMixin):
     )
     spec_values: Mapped[list["OpportunitySpecValue"]] = relationship(back_populates="opportunity")
     status_events: Mapped[list["OpportunityStatusEvent"]] = relationship(back_populates="opportunity")
+    agent_tasks: Mapped[list["AgentTask"]] = relationship(back_populates="opportunity")
 
 
 class OpportunityStatusEvent(Base, TimestampMixin):
@@ -427,6 +428,7 @@ class AIUsageLog(Base):
     deal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     research_campaign_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     input_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     cost_usd: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False, default=0)
@@ -1289,3 +1291,91 @@ class AutomatedActionLog(Base):
     owner: Mapped["User"] = relationship()
     run: Mapped["AutomationRun"] = relationship(back_populates="action_logs")
     message: Mapped["Message | None"] = relationship()
+
+
+class AgentTask(Base, TimestampMixin):
+    __tablename__ = "agent_tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    opportunity_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    deal_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("deals.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    research_campaign_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("research_campaigns.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    internet_source_search_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("internet_source_search_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    internet_source_search_hit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("internet_source_search_hits.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    agent_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    task_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    input_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    priority: Mapped[int] = mapped_column(nullable=False, default=50)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING", index=True)
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    opportunity: Mapped["Opportunity | None"] = relationship(back_populates="agent_tasks")
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
+    runs: Mapped[list["AgentRun"]] = relationship(back_populates="agent_task")
+
+
+class AgentRun(Base, TimestampMixin):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="mock")
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    toolset_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    input_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    estimated_cost: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False, default=0)
+    actual_cost: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
+    ai_usage_log_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="RUNNING", index=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    agent_task: Mapped["AgentTask"] = relationship(back_populates="runs")
+    results: Mapped[list["AgentResult"]] = relationship(back_populates="agent_run")
+
+
+class AgentResult(Base, TimestampMixin):
+    __tablename__ = "agent_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    result_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    structured_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    requires_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    agent_run: Mapped["AgentRun"] = relationship(back_populates="results")
+    applied_by: Mapped["User | None"] = relationship(foreign_keys=[applied_by_id])

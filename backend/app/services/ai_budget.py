@@ -152,6 +152,7 @@ def log_ai_usage(
     deal_id=None,
     source_id=None,
     research_campaign_id=None,
+    agent_run_id=None,
 ) -> AIUsageLog:
     entry = AIUsageLog(
         user_id=user.id,
@@ -161,6 +162,7 @@ def log_ai_usage(
         deal_id=deal_id,
         source_id=source_id,
         research_campaign_id=research_campaign_id,
+        agent_run_id=agent_run_id,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cost_usd=cost_usd,

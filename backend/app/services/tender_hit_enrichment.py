@@ -6,9 +6,10 @@ from app.ai.factory import get_ai_provider
 from app.ai.base import AIProvider
 from app.ai.schemas import TenderHitEnrichmentOutput, TenderSearchHitOutput
 from app.config import settings
-from app.domain.enums import AIUsageOperation
+from app.domain.enums import AIUsageOperation, AgentResultType, AgentType
 from app.domain.models import User
-from app.services.ai_budget import enforce_budget_or_raise, log_ai_usage
+from app.services.ai_budget import enforce_budget_or_raise
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 from app.services.document_parser import fetch_public_url_text
 
 TENDER_HIT_ENRICHMENT_SYSTEM_PROMPT = """You extract structured procurement/tender fields from notice text.
@@ -109,6 +110,7 @@ def enrich_tender_hits_with_ai(
     provider: AIProvider | None = None,
     model: str | None = None,
     verify_real: bool = True,
+    internet_source_search_run_id=None,
 ) -> tuple[list[TenderSearchHitOutput], int]:
     use_ai = (not verify_real) or (settings.ai_provider == "openai" and settings.openai_api_key)
     if not use_ai or not hits:
@@ -129,27 +131,47 @@ def enrich_tender_hits_with_ai(
             continue
 
         enforce_budget_or_raise(db, user=user)
-        result, usage = ai_provider.structured_completion(
-            model=model or settings.openai_default_model,
-            system_prompt=TENDER_HIT_ENRICHMENT_SYSTEM_PROMPT,
-            user_prompt=_build_enrichment_prompt(
-                hit=hit,
-                product_keywords=product_keywords,
-                notice_text=notice_text,
-            ),
-            output_schema=TenderHitEnrichmentOutput,
-            temperature=0.0,
-        )
-        ai_calls += 1
-        log_ai_usage(
+        with tracked_agent_run(
             db,
             user=user,
-            model=usage.model,
-            operation=AIUsageOperation.MONITORING.value,
-            cost_usd=usage.cost_usd,
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-        )
+            context=AgentExecutionContext(
+                agent_type=AgentType.TENDER_QUALIFICATION.value,
+                task_type="hit_enrichment",
+                internet_source_search_run_id=internet_source_search_run_id,
+                input_payload={
+                    "title": hit.title,
+                    "url": hit.url,
+                    "product_keywords": product_keywords,
+                },
+            ),
+        ) as agent:
+            result, usage = ai_provider.structured_completion(
+                model=model or settings.openai_default_model,
+                system_prompt=TENDER_HIT_ENRICHMENT_SYSTEM_PROMPT,
+                user_prompt=_build_enrichment_prompt(
+                    hit=hit,
+                    product_keywords=product_keywords,
+                    notice_text=notice_text,
+                ),
+                output_schema=TenderHitEnrichmentOutput,
+                temperature=0.0,
+            )
+            agent.attach_ai_usage(
+                model=usage.model,
+                operation=AIUsageOperation.MONITORING.value,
+                cost_usd=usage.cost_usd,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+            )
+            agent.record_result(
+                result_type=AgentResultType.TENDER_ENRICHMENT.value,
+                structured_payload=result.model_dump(mode="json"),
+                summary=result.extraction_notes,
+                confidence=float(result.confidence),
+                requires_review=result.confidence < 0.6,
+                applied=False,
+            )
+        ai_calls += 1
         enriched_hits.append(_merge_enrichment(hit, result))
 
     return enriched_hits, ai_calls

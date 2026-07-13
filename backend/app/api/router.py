@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     ai_settings,
+    agent_activity,
     auth,
     automation,
     company_settings,
@@ -21,6 +22,7 @@ from app.api.routes import (
 )
 
 api_router = APIRouter()
+api_router.include_router(agent_activity.router)
 api_router.include_router(auth.router)
 api_router.include_router(ai_settings.router)
 api_router.include_router(company_settings.router)

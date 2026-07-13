@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { apiClient, Deal, ExtractionResult, openSourceContent, Opportunity, Source } from "@/lib/api";
 import { AppNav } from "@/components/AppNav";
+import { AgentActivityPanel } from "@/components/AgentActivityPanel";
 import { OpportunityStatusPanel } from "@/components/OpportunityStatusPanel";
 import { ProductResolutionPanel } from "@/components/ProductResolutionPanel";
 import { SupplierLeadPanel } from "@/components/SupplierLeadPanel";
@@ -187,6 +188,8 @@ export default function OpportunityDetailPage() {
           opportunityId={params.id}
           initialRoughName={opportunity.raw_product_name}
         />
+
+        <AgentActivityPanel opportunityId={params.id} />
 
         <div style={styles.card}>
           <h2 style={{ marginTop: 0 }}>Импорт документов</h2>

@@ -61,6 +61,8 @@ pytest -v
 pytest -v -m integration
 ```
 
+Подробный план мультиагентной архитектуры: [docs/MULTI_AGENT_REFACTORING_PLAN.md](docs/MULTI_AGENT_REFACTORING_PLAN.md)
+
 Создайте тестовую БД:
 
 ```sql

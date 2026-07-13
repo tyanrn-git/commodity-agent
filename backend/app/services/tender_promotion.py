@@ -14,9 +14,12 @@ from app.domain.enums import (
     InternetSourceSearchHitStatus,
     OpportunityStatus,
     OpportunityType,
+    AgentResultType,
+    AgentType,
 )
 from app.domain.models import InternetSourceSearchHit, Opportunity, User
-from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings, log_ai_usage
+from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 from app.services.audit import log_audit
 from app.services.opportunity_status import initialize_opportunity_status
 from app.services.tender_attachments import attach_tender_link
@@ -151,22 +154,43 @@ def promote_search_hit_to_opportunity(db: Session, *, user: User, hit_id: uuid.U
     budget_settings = ensure_ai_budget_settings(db, user)
     provider = get_ai_provider()
     model = budget_settings.preferred_default_model or settings.openai_default_model
-    feasibility, usage = provider.structured_completion(
-        model=model,
-        system_prompt=FEASIBILITY_SYSTEM_PROMPT,
-        user_prompt=_build_feasibility_prompt(hit=hit, run=run),
-        output_schema=TenderFeasibilityOutput,
-        temperature=0.0,
-    )
-    log_ai_usage(
+    with tracked_agent_run(
         db,
         user=user,
-        model=usage.model,
-        operation=AIUsageOperation.MONITORING.value,
-        cost_usd=usage.cost_usd,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-    )
+        context=AgentExecutionContext(
+            agent_type=AgentType.LEGACY_TENDER_PROMOTION.value,
+            task_type="feasibility_assessment",
+            internet_source_search_run_id=run.id,
+            internet_source_search_hit_id=hit.id,
+            input_payload={
+                "hit_id": str(hit.id),
+                "title": hit.title,
+                "product_keywords": list(run.product_keywords or []),
+            },
+        ),
+    ) as agent:
+        feasibility, usage = provider.structured_completion(
+            model=model,
+            system_prompt=FEASIBILITY_SYSTEM_PROMPT,
+            user_prompt=_build_feasibility_prompt(hit=hit, run=run),
+            output_schema=TenderFeasibilityOutput,
+            temperature=0.0,
+        )
+        agent.attach_ai_usage(
+            model=usage.model,
+            operation=AIUsageOperation.MONITORING.value,
+            cost_usd=usage.cost_usd,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+        agent.record_result(
+            result_type=AgentResultType.TENDER_FEASIBILITY.value,
+            structured_payload=feasibility.model_dump(mode="json"),
+            summary=feasibility.summary,
+            confidence=float(feasibility.confidence),
+            requires_review=True,
+            applied=False,
+        )
 
     fields["feasibility"] = feasibility.model_dump(mode="json")
     hit.extracted_fields = fields
