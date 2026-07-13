@@ -7,6 +7,7 @@ import { styles } from "@/lib/styles";
 type Props = {
   opportunityId: string;
   initialRoughName?: string | null;
+  onResolved?: () => void;
 };
 
 function formatSpecValue(spec: OpportunitySpecValue): string {
@@ -19,7 +20,7 @@ function formatSpecValue(spec: OpportunitySpecValue): string {
   return "—";
 }
 
-export function ProductResolutionPanel({ opportunityId, initialRoughName }: Props) {
+export function ProductResolutionPanel({ opportunityId, initialRoughName, onResolved }: Props) {
   const [roughName, setRoughName] = useState(initialRoughName || "");
   const [sourceText, setSourceText] = useState("");
   const [resolution, setResolution] = useState<ProductResolution | null>(null);
@@ -60,6 +61,7 @@ export function ProductResolutionPanel({ opportunityId, initialRoughName }: Prop
       } else {
         setMessage(`«${result.rough_product_name}» не найден в каталоге — можно добавить через AI`);
       }
+      onResolved?.();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Ошибка AI-разрешения");
     } finally {

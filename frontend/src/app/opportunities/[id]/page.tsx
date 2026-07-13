@@ -34,6 +34,7 @@ export default function OpportunityDetailPage() {
   const [selectedSourceId, setSelectedSourceId] = useState<string>("");
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
   const [message, setMessage] = useState("");
+  const [agentActivityRefresh, setAgentActivityRefresh] = useState(0);
 
   async function load() {
     try {
@@ -187,9 +188,10 @@ export default function OpportunityDetailPage() {
         <ProductResolutionPanel
           opportunityId={params.id}
           initialRoughName={opportunity.raw_product_name}
+          onResolved={() => setAgentActivityRefresh((value) => value + 1)}
         />
 
-        <AgentActivityPanel opportunityId={params.id} />
+        <AgentActivityPanel opportunityId={params.id} refreshKey={agentActivityRefresh} />
 
         <div style={styles.card}>
           <h2 style={{ marginTop: 0 }}>Импорт документов</h2>

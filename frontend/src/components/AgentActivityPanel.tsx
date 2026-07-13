@@ -19,28 +19,36 @@ const AGENT_LABELS: Record<string, string> = {
 
 type AgentActivityPanelProps = {
   opportunityId: string;
+  refreshKey?: number;
 };
 
-export function AgentActivityPanel({ opportunityId }: AgentActivityPanelProps) {
+export function AgentActivityPanel({ opportunityId, refreshKey = 0 }: AgentActivityPanelProps) {
   const [items, setItems] = useState<AgentActivityItem[]>([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     apiClient
       .getOpportunityAgentActivity(opportunityId)
       .then(setItems)
-      .catch((err) => setError(err instanceof Error ? err.message : "Ошибка загрузки"));
-  }, [opportunityId]);
+      .catch((err) => setError(err instanceof Error ? err.message : "Ошибка загрузки"))
+      .finally(() => setLoading(false));
+  }, [opportunityId, refreshKey]);
 
   return (
     <div style={styles.card}>
-      <h2 style={{ marginTop: 0 }}>Agent Activity</h2>
+      <h2 style={{ marginTop: 0 }}>Активность агентов</h2>
       <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
         Журнал специализированных агентов: задачи, AI-вызовы и структурированные результаты.
       </p>
       {error ? <p style={{ color: "#b91c1c" }}>{error}</p> : null}
-      {items.length === 0 && !error ? (
-        <p style={{ color: "#64748b", fontSize: 14 }}>Пока нет записей агентов для этой возможности.</p>
+      {loading ? (
+        <p style={{ color: "#64748b", fontSize: 14 }}>Загрузка журнала агентов...</p>
+      ) : items.length === 0 && !error ? (
+        <p style={{ color: "#64748b", fontSize: 14 }}>
+          Пока нет записей. Нажмите «Сопоставить товар» выше — здесь появится AI-вызов с моделью и стоимостью.
+        </p>
       ) : (
         <div style={{ display: "grid", gap: 12 }}>
           {items.map((item) => {
