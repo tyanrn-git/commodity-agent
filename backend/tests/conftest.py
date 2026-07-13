@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
@@ -64,15 +64,33 @@ def setup_database() -> Generator[None, None, None]:
         conn.execute(text("CREATE SCHEMA public"))
 
 
+@pytest.fixture(autouse=True)
+def force_mock_ai(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep AI deterministic in tests even when .env provides a real API key."""
+    monkeypatch.setattr(settings, "ai_provider", "mock")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+
+
 @pytest.fixture()
 def db() -> Generator[Session, None, None]:
     connection = engine.connect()
     transaction = connection.begin()
     session = TestingSessionLocal(bind=connection)
-    yield session
-    session.close()
-    transaction.rollback()
-    connection.close()
+    nested = connection.begin_nested()
+
+    @event.listens_for(session, "after_transaction_end")
+    def restart_savepoint(sess: Session, trans) -> None:
+        nonlocal nested
+        if not nested.is_active:
+            nested = connection.begin_nested()
+
+    try:
+        yield session
+    finally:
+        event.remove(session, "after_transaction_end", restart_savepoint)
+        session.close()
+        transaction.rollback()
+        connection.close()
 
 
 @pytest.fixture()

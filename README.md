@@ -55,6 +55,12 @@ export TEST_DATABASE_URL=postgresql://commodity:commodity@localhost:5432/commodi
 pytest -v
 ```
 
+По умолчанию `pytest` не запускает тесты с живыми внешними API. Для ночного/ручного прогона:
+
+```bash
+pytest -v -m integration
+```
+
 Создайте тестовую БД:
 
 ```sql

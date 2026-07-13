@@ -139,17 +139,32 @@ def resolve_opportunity_product(
     product_created = False
 
     if product_id is None and create_if_missing and output.proposed_new_product:
-        created = create_product_from_proposal(db, user=user, proposal=output.proposed_new_product)
-        product_id = created.id
-        product_created = True
-        output = output.model_copy(
-            update={
-                "normalized_product_name": created.normalized_name,
-                "normalized_product_id": str(created.id),
-                "confidence": max(output.confidence, 0.6),
-                "parameters": output.proposed_new_product.parameters,
-            }
+        proposal = output.proposed_new_product
+        existing = db.scalar(
+            select(Product).where(Product.normalized_name.ilike(proposal.normalized_name.strip()))
         )
+        if existing:
+            product_id = existing.id
+            output = output.model_copy(
+                update={
+                    "normalized_product_name": existing.normalized_name,
+                    "normalized_product_id": str(existing.id),
+                    "confidence": max(output.confidence, 0.6),
+                    "parameters": proposal.parameters,
+                }
+            )
+        else:
+            created = create_product_from_proposal(db, user=user, proposal=proposal)
+            product_id = created.id
+            product_created = True
+            output = output.model_copy(
+                update={
+                    "normalized_product_name": created.normalized_name,
+                    "normalized_product_id": str(created.id),
+                    "confidence": max(output.confidence, 0.6),
+                    "parameters": proposal.parameters,
+                }
+            )
 
     opportunity.raw_product_name = rough_product_name
     if product_id:

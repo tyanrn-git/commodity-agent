@@ -7,6 +7,7 @@ from app.domain.enums import InternetSourceSearchRunStatus, OpportunityType
 pytestmark = pytest.mark.usefixtures("setup_database")
 
 
+@pytest.mark.integration
 def test_ai_catalog_search_real_apis(auth_client):
     response = auth_client.post(
         "/internet-sources/search",

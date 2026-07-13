@@ -7,16 +7,16 @@ def test_create_product_empty_spec(auth_client):
     created = auth_client.post(
         "/products",
         json={
-            "normalized_name": "Guar Gum",
+            "normalized_name": "Carrageenan",
             "category": "polymer",
-            "aliases": ["гуар", "guar gum"],
+            "aliases": ["каррагинан", "carrageenan"],
             "typical_units": ["MT", "kg"],
             "spec_parameters": [],
         },
     )
     assert created.status_code == 201
     data = created.json()
-    assert data["normalized_name"] == "Guar Gum"
+    assert data["normalized_name"] == "Carrageenan"
     assert data["completeness"]["total_parameters"] == 0
     assert data["completeness"]["completeness_percent"] == 0
 
@@ -63,7 +63,7 @@ def test_resolve_and_create_catalog_product(auth_client):
     )
     assert created.status_code == 200
     body = created.json()
-    assert body["product_created"] is True
+    assert body["product_created"] is False
     assert body["matched"] is True
     assert body["normalized_product_name"] == "Guar Gum"
     assert len(body["spec_values"]) >= 1
