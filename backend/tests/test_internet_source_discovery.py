@@ -64,3 +64,25 @@ def test_match_endpoint_auto_discovers_sources(auth_client):
     assert response.status_code == 200
     data = response.json()
     assert data["matched_count"] >= 1
+
+
+def test_system_catalog_uses_only_official_ted_api_source(db):
+    from sqlalchemy import select
+
+    from app.domain.enums import InternetSourceFetchStrategy
+    from app.domain.models import InternetSource
+    from app.integrations.ted import is_ted_web_portal
+    from app.services.internet_source_catalog import sync_system_internet_sources
+
+    sync_system_internet_sources(db)
+    sources = list(db.scalars(select(InternetSource).where(InternetSource.owner_id.is_(None))))
+    ted_sources = [
+        source
+        for source in sources
+        if source.fetch_strategy == InternetSourceFetchStrategy.TED_API.value
+        or is_ted_web_portal(source.base_url)
+    ]
+    assert len(ted_sources) >= 1
+    active_ted = [source for source in ted_sources if source.is_active]
+    assert len(active_ted) == 1
+    assert active_ted[0].fetch_strategy == InternetSourceFetchStrategy.TED_API.value

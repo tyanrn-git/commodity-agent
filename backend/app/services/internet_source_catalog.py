@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.enums import AuditAction, InternetSourceFetchStrategy, InternetSourceKind, MonitoringAccessMode
 from app.domain.models import InternetSource, User
+from app.integrations.ted import is_ted_source, is_ted_web_portal
 from app.services.audit import log_audit
 from app.services.product_keyword_localization import expand_product_keywords, source_keyword_matches
 
@@ -95,51 +96,66 @@ def match_internet_sources(
             score += keyword_hits * 10
 
         if region_filters:
-            source_regions = [str(region).lower() for region in (source.regions or [])]
-            if any(region == "global" for region in source_regions):
-                region_hits = 1
-            else:
-                region_hits = sum(
-                    1
-                    for region in region_filters
-                    if any(region in source_region or source_region in region for source_region in source_regions)
-                )
-            if region_hits == 0:
+            if not _source_region_matches(source, region_filters):
                 continue
-            score += region_hits * 5
+            score += 5
 
         matched.append((score, source))
 
     matched.sort(key=lambda item: (-item[0], item[1].name.lower()))
-    if matched or not keywords:
-        return [source for _, source in matched]
+    result = [source for _, source in matched]
 
-    # Universal procurement feeds still apply when product is outside seeded tags.
-    fallback: list[tuple[int, InternetSource]] = []
+    if keywords:
+        universal_feeds = _collect_universal_api_feeds(
+            sources,
+            region_filters=region_filters,
+            access_mode=access_mode,
+            include_inactive=include_inactive,
+        )
+        seen_ids = {source.id for source in result}
+        prepended = [source for source in universal_feeds if source.id not in seen_ids]
+        result = prepended + result
+
+    return result
+
+
+def _source_region_matches(source: InternetSource, region_filters: list[str]) -> bool:
+    if not region_filters:
+        return True
+    source_regions = [str(region).lower() for region in (source.regions or [])]
+    if any(region == "global" for region in source_regions):
+        return True
+    return any(
+        region in source_region or source_region in region
+        for region in region_filters
+        for source_region in source_regions
+    )
+
+
+def _collect_universal_api_feeds(
+    sources: list[InternetSource],
+    *,
+    region_filters: list[str],
+    access_mode: str | None,
+    include_inactive: bool,
+) -> list[InternetSource]:
+    universal_strategies = {
+        InternetSourceFetchStrategy.TED_API.value,
+        InternetSourceFetchStrategy.WORLD_BANK_API.value,
+    }
+    feeds: list[InternetSource] = []
     for source in sources:
         if not source.is_active and not include_inactive:
             continue
         if access_mode and source.access_mode != access_mode:
             continue
-        if source.fetch_strategy not in {
-            InternetSourceFetchStrategy.TED_API.value,
-            InternetSourceFetchStrategy.WORLD_BANK_API.value,
-        }:
+        if source.fetch_strategy not in universal_strategies:
             continue
-        if region_filters:
-            source_regions = [str(region).lower() for region in (source.regions or [])]
-            if not any(region == "global" for region in source_regions):
-                region_hits = sum(
-                    1
-                    for region in region_filters
-                    if any(region in source_region or source_region in region for source_region in source_regions)
-                )
-                if region_hits == 0:
-                    continue
-        fallback.append((source.priority, source))
-
-    fallback.sort(key=lambda item: (-item[0], item[1].name.lower()))
-    return [source for _, source in fallback]
+        if region_filters and not _source_region_matches(source, region_filters):
+            continue
+        feeds.append(source)
+    feeds.sort(key=lambda item: (-item.priority, item.name.lower()))
+    return feeds
 
 
 def get_internet_source(db: Session, *, user: User, source_id: uuid.UUID) -> InternetSource:
@@ -261,6 +277,7 @@ SYSTEM_INTERNET_SOURCES: list[dict] = [
         "product_tags": [
             "urea", "carbamide", "fertilizer", "chemicals", "карбамид",
             "commodities", "polymers", "gum", "guar gum", "procurement",
+            "transformer oil", "insulating oil", "трансформаторное масло", "base oil", "oil",
         ],
         "languages": ["en"],
         "description": "Official EU TED Search API — real published procurement notices.",
@@ -353,6 +370,7 @@ LEGACY_TEST_SOURCE_NAMES = (
     "NFL India",
     "EU Lubricants Buyer Portal",
     "TED Europa",
+    "TED — Tenders Electronic Daily",
     "Demo EU lubricants feed",
 )
 
@@ -393,6 +411,16 @@ def sync_system_internet_sources(db: Session) -> int:
         legacy.is_active = False
         legacy.is_test = True
         changed += 1
+
+    for legacy in db.scalars(select(InternetSource).where(InternetSource.owner_id.is_(None))):
+        if legacy.fetch_strategy == InternetSourceFetchStrategy.TED_API.value:
+            continue
+        if is_ted_web_portal(legacy.base_url) or (
+            is_ted_source(legacy) and legacy.fetch_strategy == InternetSourceFetchStrategy.HTML.value
+        ):
+            legacy.is_active = False
+            legacy.is_test = True
+            changed += 1
 
     if changed:
         db.commit()

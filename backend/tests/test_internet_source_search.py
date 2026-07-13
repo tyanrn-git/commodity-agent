@@ -31,9 +31,11 @@ def test_ai_catalog_search_real_apis(auth_client):
     assert not any("example.com" in (h.get("canonical_url") or "") for h in hits)
 
 
-@patch("app.services.internet_source_search.search_ted_notices")
-def test_search_works_for_unlisted_product(mock_ted, auth_client):
-    mock_ted.return_value = ([], "API")
+@patch("app.services.internet_source_search.get_ted_search_provider")
+def test_search_works_for_unlisted_product(mock_get_provider, auth_client):
+    mock_provider = MagicMock()
+    mock_provider.search_notices.return_value = MagicMock(hits=[], status="API", error=None)
+    mock_get_provider.return_value = mock_provider
     response = auth_client.post(
         "/internet-sources/search",
         json={
@@ -46,12 +48,14 @@ def test_search_works_for_unlisted_product(mock_ted, auth_client):
     assert response.status_code == 200
     run = response.json()
     assert run["sources_matched"] >= 1
-    assert mock_ted.called
+    assert mock_provider.search_notices.called
 
 
-@patch("app.services.internet_source_search.search_ted_notices")
-def test_search_uses_localized_keywords_for_russian_input(mock_ted, auth_client):
-    mock_ted.return_value = ([], "API")
+@patch("app.services.internet_source_search.get_ted_search_provider")
+def test_search_uses_localized_keywords_for_russian_input(mock_get_provider, auth_client):
+    mock_provider = MagicMock()
+    mock_provider.search_notices.return_value = MagicMock(hits=[], status="API", error=None)
+    mock_get_provider.return_value = mock_provider
     response = auth_client.post(
         "/internet-sources/search",
         json={
@@ -62,12 +66,12 @@ def test_search_uses_localized_keywords_for_russian_input(mock_ted, auth_client)
         },
     )
     assert response.status_code == 200
-    assert mock_ted.called
-    used_keywords = mock_ted.call_args.kwargs["keywords"]
+    assert mock_provider.search_notices.called
+    used_keywords = mock_provider.search_notices.call_args.kwargs["keywords"]
     assert "urea" in [keyword.lower() for keyword in used_keywords]
 
 
-@patch("app.integrations.tender_feeds.httpx.Client")
+@patch("app.integrations.ted.provider.httpx.Client")
 def test_ted_parser(mock_client_cls):
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()

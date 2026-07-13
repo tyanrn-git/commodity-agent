@@ -15,6 +15,7 @@ from app.domain.enums import AIUsageOperation, AuditAction, InternetSourceFetchS
 from app.domain.models import InternetSource, User
 from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings, log_ai_usage
 from app.services.audit import log_audit
+from app.integrations.ted import is_ted_api_url, is_ted_web_portal
 from app.services.internet_source_catalog import create_internet_source, list_internet_sources, match_internet_sources
 from app.services.product_keyword_localization import build_keyword_search_set, expand_product_keywords
 
@@ -23,7 +24,8 @@ Rules:
 - Return ONLY platforms that are NOT already listed in the known catalog.
 - Prefer official government portals, state trading companies, commodity exchanges, and reputable aggregators.
 - Each candidate must be a real, plausible public website for tenders or procurement notices.
-- Use fetch_strategy=HTML unless the source is clearly a documented open API (then TED_API or WORLD_BANK_API only if certain).
+- Do NOT suggest TED (ted.europa.eu) — it is already covered by the official TED Search API source.
+- Use fetch_strategy=HTML unless the source is clearly a documented open API (then WORLD_BANK_API only if certain).
 - product_tags must include the user's commodity terms and related trade names.
 - search_hints: concise instructions where on the site to find tenders for this product.
 - Do not duplicate URLs from the known catalog, even under a different name.
@@ -126,6 +128,24 @@ def _merge_product_tags(existing: list[str], new_tags: list[str], user_keywords:
     return merged
 
 
+def _find_system_ted_source(sources: list[InternetSource]) -> InternetSource | None:
+    for source in sources:
+        if source.owner_id is not None:
+            continue
+        if source.fetch_strategy == InternetSourceFetchStrategy.TED_API.value:
+            return source
+    for source in sources:
+        if source.owner_id is not None:
+            continue
+        if is_ted_api_url(source.base_url) or is_ted_web_portal(source.base_url):
+            return source
+    return None
+
+
+def _is_ted_discovery_candidate(url: str) -> bool:
+    return is_ted_api_url(url) or is_ted_web_portal(url)
+
+
 @dataclass(frozen=True)
 class SourceDiscoveryResult:
     added_sources: list[InternetSource]
@@ -198,6 +218,17 @@ def discover_and_register_sources(
         if not normalized:
             skipped += 1
             continue
+
+        if _is_ted_discovery_candidate(candidate.base_url):
+            ted_system = _find_system_ted_source(all_sources)
+            if ted_system is not None:
+                merged_tags = _merge_product_tags(ted_system.product_tags or [], candidate.product_tags, keywords)
+                if merged_tags != (ted_system.product_tags or []):
+                    ted_system.product_tags = merged_tags
+                    ted_system.search_hints = ted_system.search_hints or candidate.search_hints
+                skipped += 1
+                continue
+
         if normalized in known_index:
             existing = known_index[normalized]
             merged_tags = _merge_product_tags(existing.product_tags or [], candidate.product_tags, keywords)

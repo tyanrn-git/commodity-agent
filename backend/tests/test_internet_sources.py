@@ -51,6 +51,21 @@ def test_match_guar_gum_sources_russian_keyword(auth_client):
     assert "TED — EU Notices API" in names or "World Bank Procurement" in names
 
 
+def test_match_transformer_oil_includes_ted(auth_client):
+    response = auth_client.get(
+        "/internet-sources/match",
+        params={
+            "product_keywords": "трансформаторное масло",
+            "regions": "India,EU,Global",
+            "auto_discover": False,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    names = [source["name"] for source in data["sources"]]
+    assert "TED — EU Notices API" in names
+
+
 def test_create_user_internet_source(auth_client):
     created = auth_client.post(
         "/internet-sources",
@@ -71,6 +86,32 @@ def test_create_user_internet_source(auth_client):
     assert listed.status_code == 200
     names = {source["name"] for source in listed.json()}
     assert "My tender portal" in names
+
+
+def test_create_credentials_internet_source(auth_client):
+    created = auth_client.post(
+        "/internet-sources",
+        json={
+            "name": "Platts closed portal",
+            "base_url": "https://portal.platts.example/tenders",
+            "access_mode": "CREDENTIALS",
+            "fetch_config": {
+                "credentials": {
+                    "platform_name": "Platts",
+                    "login_url": "https://portal.platts.example/login",
+                    "username": "desk@company.com",
+                    "password_hint": "vault:platts-prod",
+                    "access_notes": "VPN required",
+                }
+            },
+            "product_tags": ["transformer oil"],
+            "regions": ["Global"],
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["access_mode"] == "CREDENTIALS"
+    assert body["fetch_config"]["credentials"]["username"] == "desk@company.com"
 
 
 def test_system_source_is_read_only(auth_client):

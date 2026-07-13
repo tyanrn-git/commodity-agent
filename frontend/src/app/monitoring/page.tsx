@@ -155,6 +155,156 @@ function TenderResultRow({
   );
 }
 
+function normalizeSourceUrl(url: string) {
+  const cleaned = url.trim().replace(/\/$/, "");
+  try {
+    const parsed = new URL(cleaned.includes("://") ? cleaned : `https://${cleaned}`);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    const path = parsed.pathname.replace(/\/$/, "").toLowerCase();
+    return `${parsed.protocol}//${host}${path}`;
+  } catch {
+    return cleaned.toLowerCase();
+  }
+}
+
+function dedupeSources(items: InternetSource[]) {
+  const seen = new Set<string>();
+  const result: InternetSource[] = [];
+  for (const source of items) {
+    const key = normalizeSourceUrl(source.base_url);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(source);
+  }
+  return result;
+}
+
+function SourceCatalogTable({
+  sources,
+  togglingSourceId,
+  onToggleSourceActive,
+}: {
+  sources: InternetSource[];
+  togglingSourceId: string | null;
+  onToggleSourceActive: (source: InternetSource) => Promise<void>;
+}) {
+  if (sources.length === 0) {
+    return <p style={{ marginTop: 12, color: "#64748b" }}>Нет источников в этой категории.</p>;
+  }
+
+  return (
+    <div style={{ marginTop: 12, overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+        <thead>
+          <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+            <th style={{ padding: "8px 6px" }}>Источник</th>
+            <th style={{ padding: "8px 6px" }}>Тип</th>
+            <th style={{ padding: "8px 6px" }}>Товары</th>
+            <th style={{ padding: "8px 6px" }}>Регионы</th>
+            <th style={{ padding: "8px 6px" }}>Статус</th>
+            <th style={{ padding: "8px 6px" }}>Подсказка / доступ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sources.map((source) => {
+            const credentials = (source.fetch_config?.credentials || null) as {
+              platform_name?: string;
+              login_url?: string;
+              username?: string;
+              password_hint?: string;
+              access_notes?: string;
+            } | null;
+            return (
+              <tr
+                key={source.id}
+                style={{
+                  borderBottom: "1px solid #f1f5f9",
+                  opacity: source.is_active ? 1 : 0.65,
+                }}
+              >
+                <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
+                  <a href={source.base_url} target="_blank" rel="noreferrer" style={styles.link}>
+                    {source.name}
+                  </a>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    {source.is_system ? "системный" : "мой"} · приоритет {source.priority}
+                    {source.is_test ? (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          background: "#fef3c7",
+                          color: "#92400e",
+                        }}
+                      >
+                        тестовый
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
+                <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
+                  {SOURCE_KIND_LABELS[source.source_kind] || source.source_kind}
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    {ACCESS_MODE_LABELS[source.access_mode] || source.access_mode}
+                    {source.fetch_strategy && source.fetch_strategy !== "HTML"
+                      ? ` · ${source.fetch_strategy}`
+                      : ""}
+                  </div>
+                </td>
+                <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
+                  {source.product_tags.join(", ")}
+                </td>
+                <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
+                  {source.regions.join(", ")}
+                </td>
+                <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
+                  <button
+                    type="button"
+                    style={styles.secondaryButton}
+                    disabled={togglingSourceId === source.id}
+                    onClick={() => onToggleSourceActive(source)}
+                  >
+                    {source.is_active ? "Отключить" : "Подключить"}
+                  </button>
+                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
+                    {source.is_active ? "активен" : "неактивен"}
+                  </div>
+                </td>
+                <td style={{ padding: "10px 6px", verticalAlign: "top", fontSize: 13, color: "#475569" }}>
+                  {source.search_hints || source.description || "—"}
+                  {credentials ? (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#334155" }}>
+                      {credentials.platform_name ? (
+                        <div>Платформа: {credentials.platform_name}</div>
+                      ) : null}
+                      {credentials.login_url ? (
+                        <div>
+                          Вход:{" "}
+                          <a href={credentials.login_url} target="_blank" rel="noreferrer" style={styles.link}>
+                            {credentials.login_url}
+                          </a>
+                        </div>
+                      ) : null}
+                      {credentials.username ? <div>Логин: {credentials.username}</div> : null}
+                      {credentials.password_hint ? (
+                        <div>Пароль: {credentials.password_hint}</div>
+                      ) : null}
+                      {credentials.access_notes ? (
+                        <div style={{ marginTop: 4, color: "#64748b" }}>{credentials.access_notes}</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function MonitoringPage() {
   const router = useRouter();
   const [rules, setRules] = useState<MonitoringRule[]>([]);
@@ -171,7 +321,7 @@ export default function MonitoringPage() {
 
   const [catalogProductFilter, setCatalogProductFilter] = useState("urea, карбамид");
   const [catalogRegionFilter, setCatalogRegionFilter] = useState("India, EU, Global");
-  const [catalogAccessFilter, setCatalogAccessFilter] = useState("PUBLIC");
+  const [catalogAccessFilter, setCatalogAccessFilter] = useState("");
   const [showInactiveSources, setShowInactiveSources] = useState(false);
   const [togglingSourceId, setTogglingSourceId] = useState<string | null>(null);
 
@@ -180,6 +330,12 @@ export default function MonitoringPage() {
   const [newSourceTags, setNewSourceTags] = useState("urea, карбамид");
   const [newSourceRegions, setNewSourceRegions] = useState("India");
   const [newSourceHints, setNewSourceHints] = useState("");
+  const [newSourceAccessMode, setNewSourceAccessMode] = useState("PUBLIC");
+  const [newSourcePlatformName, setNewSourcePlatformName] = useState("");
+  const [newSourceLoginUrl, setNewSourceLoginUrl] = useState("");
+  const [newSourceUsername, setNewSourceUsername] = useState("");
+  const [newSourcePasswordHint, setNewSourcePasswordHint] = useState("");
+  const [newSourceAccessNotes, setNewSourceAccessNotes] = useState("");
   const [newSourceIsTest, setNewSourceIsTest] = useState(false);
 
   const [ruleName, setRuleName] = useState("");
@@ -197,7 +353,7 @@ export default function MonitoringPage() {
       access_mode: catalogAccessFilter || undefined,
       include_inactive: showInactiveSources,
     });
-    setSources(match.sources);
+    setSources(dedupeSources(match.sources));
     if (match.sources_discovered && match.sources_discovered > 0) {
       setMessage(`AI добавил ${match.sources_discovered} новых площадок в каталог`);
     }
@@ -281,7 +437,7 @@ export default function MonitoringPage() {
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
-        access_mode: catalogAccessFilter || "PUBLIC",
+        access_mode: "PUBLIC",
         verify_real: true,
       });
       setSearchRun(run);
@@ -327,11 +483,22 @@ export default function MonitoringPage() {
     setError("");
     setMessage("");
     try {
+      const fetchConfig: Record<string, unknown> = {};
+      if (newSourceAccessMode === "CREDENTIALS") {
+        fetchConfig.credentials = {
+          platform_name: newSourcePlatformName.trim() || newSourceName.trim(),
+          login_url: newSourceLoginUrl.trim() || newSourceUrl.trim(),
+          username: newSourceUsername.trim() || null,
+          password_hint: newSourcePasswordHint.trim() || null,
+          access_notes: newSourceAccessNotes.trim() || null,
+        };
+      }
       const created = await apiClient.createInternetSource({
         name: newSourceName.trim(),
         base_url: newSourceUrl.trim(),
         source_kind: "TENDER_PORTAL",
-        access_mode: "PUBLIC",
+        access_mode: newSourceAccessMode,
+        fetch_config: fetchConfig,
         product_tags: newSourceTags
           .split(",")
           .map((item) => item.trim())
@@ -346,6 +513,12 @@ export default function MonitoringPage() {
       });
       setNewSourceName("");
       setNewSourceUrl("");
+      setNewSourceAccessMode("PUBLIC");
+      setNewSourcePlatformName("");
+      setNewSourceLoginUrl("");
+      setNewSourceUsername("");
+      setNewSourcePasswordHint("");
+      setNewSourceAccessNotes("");
       setNewSourceIsTest(false);
       setMessage(`Источник «${created.name}» добавлен в каталог`);
       await loadCatalog();
@@ -407,6 +580,9 @@ export default function MonitoringPage() {
     await selectRule(activeRule);
   }
 
+  const publicSources = sources.filter((source) => source.access_mode === "PUBLIC");
+  const privateSources = sources.filter((source) => source.access_mode !== "PUBLIC");
+
   return (
     <main style={styles.page}>
       <div style={styles.container}>
@@ -445,16 +621,16 @@ export default function MonitoringPage() {
               />
             </div>
             <div>
-              <label style={styles.label}>Доступ</label>
+              <label style={styles.label}>Доступ (фильтр)</label>
               <select
                 style={styles.input}
                 value={catalogAccessFilter}
                 onChange={(e) => setCatalogAccessFilter(e.target.value)}
               >
-                <option value="">Любой</option>
-                <option value="PUBLIC">Открытый</option>
-                <option value="CREDENTIALS">С доступом</option>
-                <option value="MANUAL_IMPORT">Ручной импорт</option>
+                <option value="">Все категории</option>
+                <option value="PUBLIC">Только открытые</option>
+                <option value="CREDENTIALS">Только с доступом</option>
+                <option value="MANUAL_IMPORT">Только ручной импорт</option>
               </select>
             </div>
           </div>
@@ -478,88 +654,31 @@ export default function MonitoringPage() {
             </label>
           </div>
           {sources.length > 0 ? (
-            <div style={{ marginTop: 16, overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-                <thead>
-                  <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
-                    <th style={{ padding: "8px 6px" }}>Источник</th>
-                    <th style={{ padding: "8px 6px" }}>Тип</th>
-                    <th style={{ padding: "8px 6px" }}>Товары</th>
-                    <th style={{ padding: "8px 6px" }}>Регионы</th>
-                    <th style={{ padding: "8px 6px" }}>Статус</th>
-                    <th style={{ padding: "8px 6px" }}>Подсказка для AI</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sources.map((source) => (
-                    <tr
-                      key={source.id}
-                      style={{
-                        borderBottom: "1px solid #f1f5f9",
-                        opacity: source.is_active ? 1 : 0.65,
-                      }}
-                    >
-                      <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
-                        <a href={source.base_url} target="_blank" rel="noreferrer" style={styles.link}>
-                          {source.name}
-                        </a>
-                        <div style={{ fontSize: 12, color: "#64748b" }}>
-                          {source.is_system ? "системный" : "мой"} · приоритет {source.priority}
-                          {source.is_test ? (
-                            <span
-                              style={{
-                                marginLeft: 8,
-                                padding: "1px 6px",
-                                borderRadius: 4,
-                                background: "#fef3c7",
-                                color: "#92400e",
-                              }}
-                            >
-                              тестовый
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
-                        {SOURCE_KIND_LABELS[source.source_kind] || source.source_kind}
-                        <div style={{ fontSize: 12, color: "#64748b" }}>
-                          {ACCESS_MODE_LABELS[source.access_mode] || source.access_mode}
-                          {source.fetch_strategy && source.fetch_strategy !== "HTML"
-                            ? ` · ${source.fetch_strategy}`
-                            : ""}
-                        </div>
-                      </td>
-                      <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
-                        {source.product_tags.join(", ")}
-                      </td>
-                      <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
-                        {source.regions.join(", ")}
-                      </td>
-                      <td style={{ padding: "10px 6px", verticalAlign: "top" }}>
-                        <button
-                          type="button"
-                          style={styles.secondaryButton}
-                          disabled={togglingSourceId === source.id}
-                          onClick={() => onToggleSourceActive(source)}
-                        >
-                          {source.is_active ? "Отключить" : "Подключить"}
-                        </button>
-                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
-                          {source.is_active ? "активен" : "неактивен"}
-                        </div>
-                      </td>
-                      <td style={{ padding: "10px 6px", verticalAlign: "top", fontSize: 13, color: "#475569" }}>
-                        {source.search_hints || source.description || "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ marginTop: 16 }}>
+              <h3 style={{ marginTop: 0, fontSize: 16 }}>Открытые источники</h3>
+              <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
+                Система опрашивает автоматически — TED API, World Bank и публичные порталы.
+              </p>
+              <SourceCatalogTable
+                sources={publicSources}
+                togglingSourceId={togglingSourceId}
+                onToggleSourceActive={onToggleSourceActive}
+              />
+
+              <h3 style={{ marginTop: 24, fontSize: 16 }}>Закрытые источники (с доступом)</h3>
+              <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
+                Платформы с логином или ручным импортом — укажите ссылку и credentials при добавлении.
+              </p>
+              <SourceCatalogTable
+                sources={privateSources}
+                togglingSourceId={togglingSourceId}
+                onToggleSourceActive={onToggleSourceActive}
+              />
             </div>
           ) : (
             <p style={{ marginTop: 12, color: "#64748b" }}>
-              Нет источников по точному совпадению тегов. Можно всё равно запустить поиск —
-              будут проверены общие ленты TED и World Bank.
+              Нет источников по фильтру. Нажмите «Подобрать источники» — TED и World Bank
+              подключаются автоматически для EU/Global.
             </p>
           )}
           {searchRun ? (
@@ -605,8 +724,8 @@ export default function MonitoringPage() {
             </div>
           ) : searchRun ? (
             <p style={{ marginTop: 12, color: "#64748b" }}>
-              По запросу актуальных тендеров не найдено. Попробуйте расширить регион или
-              уточнить товар (например, «gum arabic», «guar gum»).
+              По запросу актуальных тендеров не найдено. Проверьте, что в списке есть TED — EU
+              Notices API, и попробуйте английские синонимы (transformer oil, insulating oil).
             </p>
           ) : null}
         </div>
@@ -622,7 +741,7 @@ export default function MonitoringPage() {
               placeholder="Портал тендеров Турции"
               required
             />
-            <label style={styles.label}>URL</label>
+            <label style={styles.label}>URL площадки</label>
             <input
               style={styles.input}
               value={newSourceUrl}
@@ -630,6 +749,55 @@ export default function MonitoringPage() {
               placeholder="https://..."
               required
             />
+            <label style={styles.label}>Режим доступа</label>
+            <select
+              style={styles.input}
+              value={newSourceAccessMode}
+              onChange={(e) => setNewSourceAccessMode(e.target.value)}
+            >
+              <option value="PUBLIC">Открытый — система опрашивает сама</option>
+              <option value="CREDENTIALS">Закрытый — нужен логин</option>
+              <option value="MANUAL_IMPORT">Ручной импорт (CSV, email, PDF)</option>
+            </select>
+            {newSourceAccessMode === "CREDENTIALS" ? (
+              <>
+                <label style={styles.label}>Платформа</label>
+                <input
+                  style={styles.input}
+                  value={newSourcePlatformName}
+                  onChange={(e) => setNewSourcePlatformName(e.target.value)}
+                  placeholder="Platts, биржа, B2B-портал..."
+                />
+                <label style={styles.label}>Ссылка на вход</label>
+                <input
+                  style={styles.input}
+                  value={newSourceLoginUrl}
+                  onChange={(e) => setNewSourceLoginUrl(e.target.value)}
+                  placeholder="https://portal.example.com/login"
+                />
+                <label style={styles.label}>Логин / аккаунт</label>
+                <input
+                  style={styles.input}
+                  value={newSourceUsername}
+                  onChange={(e) => setNewSourceUsername(e.target.value)}
+                  placeholder="company@example.com"
+                />
+                <label style={styles.label}>Пароль (подсказка / vault)</label>
+                <input
+                  style={styles.input}
+                  value={newSourcePasswordHint}
+                  onChange={(e) => setNewSourcePasswordHint(e.target.value)}
+                  placeholder="в vault / 1Password / env PLATFORM_PASSWORD"
+                />
+                <label style={styles.label}>Заметка по доступу</label>
+                <textarea
+                  style={{ ...styles.input, minHeight: 64, resize: "vertical" }}
+                  value={newSourceAccessNotes}
+                  onChange={(e) => setNewSourceAccessNotes(e.target.value)}
+                  placeholder="VPN, API-ключ, экспорт раз в день..."
+                />
+              </>
+            ) : null}
             <label style={styles.label}>Товары (через запятую)</label>
             <input style={styles.input} value={newSourceTags} onChange={(e) => setNewSourceTags(e.target.value)} />
             <label style={styles.label}>Регионы (через запятую)</label>

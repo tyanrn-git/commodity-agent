@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app.ai.schemas import TenderSearchHitOutput
+from app.integrations.ted import get_ted_search_provider
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -12,63 +13,6 @@ DEFAULT_HEADERS = {
     ),
     "Accept": "text/html,application/json,*/*",
 }
-
-
-def _pick_title(title_field) -> str:
-    if isinstance(title_field, dict):
-        for key in ("eng", "en", "gle", "fra", "deu", "spa"):
-            value = title_field.get(key)
-            if value:
-                return str(value)
-        for value in title_field.values():
-            if value:
-                return str(value)
-    return str(title_field or "Procurement notice")
-
-
-def _keyword_query(keywords: list[str]) -> str:
-    clauses: list[str] = []
-    seen: set[str] = set()
-
-    def add_clause(clause: str) -> None:
-        if clause and clause not in seen:
-            seen.add(clause)
-            clauses.append(clause)
-
-    for keyword in keywords:
-        cleaned = keyword.strip()
-        if not cleaned:
-            continue
-        if " " in cleaned:
-            safe = cleaned.replace('"', "")
-            add_clause(f'FT~"{safe}"')
-            continue
-        token = re.sub(r"[^\w\-]+", "", cleaned.lower())
-        if token:
-            add_clause(f"FT~{token}")
-
-    if not clauses:
-        return "FT~procurement"
-    if len(clauses) == 1:
-        return clauses[0]
-    return " OR ".join(clauses)
-
-
-def _prioritize_ted_keywords(keywords: list[str], *, max_terms: int = 6) -> list[str]:
-    generic = {"gum", "resin", "смола", "goma", "gomme"}
-    ranked = sorted(keywords, key=lambda value: (-len(value.split()), -len(value), value.lower()))
-    selected: list[str] = []
-    for keyword in ranked:
-        cleaned = keyword.strip()
-        if not cleaned:
-            continue
-        if cleaned.lower() in generic and len(ranked) > 1:
-            continue
-        if cleaned not in selected:
-            selected.append(cleaned)
-        if len(selected) >= max_terms:
-            break
-    return selected or [keyword.strip() for keyword in keywords if keyword.strip()][:max_terms]
 
 
 def _product_from_notice_text(text: str, keywords: list[str]) -> str | None:
@@ -86,50 +30,12 @@ def search_ted_notices(
     search_date: datetime,
     limit: int = 10,
 ) -> tuple[list[TenderSearchHitOutput], str]:
-    keywords = _prioritize_ted_keywords(keywords)
-    date_from = (search_date.astimezone(timezone.utc) - timedelta(days=30)).strftime("%Y%m%d")
-    query = f"{_keyword_query(keywords)} AND PD>={date_from}"
-    payload = {
-        "query": query,
-        "fields": ["ND", "PD", "TI", "publication-number", "buyer-name"],
-        "limit": limit,
-        "scope": "ACTIVE",
-    }
-    with httpx.Client(timeout=30.0) as client:
-        response = client.post(
-            "https://api.ted.europa.eu/v3/notices/search",
-            json=payload,
-            headers={**DEFAULT_HEADERS, "Content-Type": "application/json"},
-        )
-        response.raise_for_status()
-        data = response.json()
-
-    hits: list[TenderSearchHitOutput] = []
-    for notice in data.get("notices", []):
-        publication_number = notice.get("publication-number") or notice.get("ND")
-        title = _pick_title(notice.get("TI"))
-        publication_date = str(notice.get("PD") or "")[:10] or None
-        buyer = notice.get("buyer-name")
-        if isinstance(buyer, dict):
-            buyer = _pick_title(buyer)
-        url = (
-            f"https://ted.europa.eu/en/notice/{publication_number}/html"
-            if publication_number
-            else "https://ted.europa.eu/"
-        )
-        hits.append(
-            TenderSearchHitOutput(
-                title=title,
-                url=url,
-                product=_product_from_notice_text(title, keywords),
-                buyer=str(buyer) if buyer else None,
-                publication_date=publication_date,
-                body=title,
-                confidence=0.95,
-                evidence_excerpt=f"TED notice {publication_number}: {title}",
-            )
-        )
-    return hits, "API"
+    result = get_ted_search_provider().search_notices(
+        keywords=keywords,
+        search_date=search_date,
+        limit=limit,
+    )
+    return result.hits, result.status
 
 
 def search_world_bank_notices(

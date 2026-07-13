@@ -26,6 +26,7 @@ class InternetSourceUpdate(BaseModel):
     base_url: str | None = Field(default=None, min_length=1, max_length=1024)
     source_kind: str | None = None
     access_mode: str | None = None
+    fetch_config: dict | None = None
     regions: list[str] | None = None
     product_tags: list[str] | None = None
     languages: list[str] | None = None

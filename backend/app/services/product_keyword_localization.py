@@ -64,6 +64,18 @@ COMMODITY_TERM_GROUPS: list[dict[str, list[str]]] = [
         "zh": ["原油", "基础油"],
     },
     {
+        "en": ["transformer oil", "insulating oil", "dielectric oil", "mineral insulating oil"],
+        "ru": ["трансформаторное масло", "изоляционное масло", "диэлектрическое масло"],
+        "es": ["aceite transformador", "aceite aislante", "aceite dieléctrico"],
+        "fr": ["huile de transformateur", "huile isolante", "huile diélectrique"],
+        "ar": ["زيت المحولات", "زيت عازل"],
+        "hi": ["ट्रांसफार्मर ऑयल", "इंसुलेटिंग ऑयल"],
+        "pt": ["óleo de transformador", "óleo isolante"],
+        "de": ["transformatorenöl", "isolieröl"],
+        "tr": ["transformatör yağı", "yalıtım yağı"],
+        "zh": ["变压器油", "绝缘油"],
+    },
+    {
         "en": ["methanol", "ethanol", "coal", "natural gas", "lng", "sulfur", "sulphur"],
         "ru": ["метанол", "этанол", "уголь", "газ", "сера"],
         "es": ["metanol", "etanol", "carbón", "gas natural", "glp", "azufre"],

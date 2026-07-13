@@ -28,9 +28,9 @@ from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_set
 from app.services.audit import log_audit
 from app.integrations.tender_feeds import (
     extract_html_keyword_hits,
-    search_ted_notices,
     search_world_bank_notices,
 )
+from app.integrations.ted import get_ted_search_provider, is_ted_source
 from app.services.document_parser import fetch_public_url_text
 from app.services.internet_source_catalog import list_internet_sources, match_internet_sources
 from app.services.internet_source_discovery import discover_and_register_sources
@@ -143,6 +143,20 @@ def _resolve_search_sources(
     ]
     public_sources.sort(key=lambda source: -source.priority)
     return public_sources[:max_sources]
+
+
+def _dedupe_ted_sources(sources: list[InternetSource]) -> list[InternetSource]:
+    ted_sources = [source for source in sources if is_ted_source(source)]
+    if len(ted_sources) <= 1:
+        return sources
+    canonical = max(
+        ted_sources,
+        key=lambda source: (
+            1 if source.fetch_strategy == InternetSourceFetchStrategy.TED_API.value else 0,
+            source.priority,
+        ),
+    )
+    return [source for source in sources if not is_ted_source(source)] + [canonical]
 
 
 def _hit_status_from_evaluation(evaluation) -> str:
@@ -261,10 +275,18 @@ def _collect_source_hits(
     fetch_error: str | None = None
     _ = regions
 
-    if strategy == InternetSourceFetchStrategy.TED_API.value:
+    if is_ted_source(source):
         try:
-            hits, status = search_ted_notices(keywords=keywords, search_date=search_date, limit=8)
-            return hits, status, None, False
+            result = get_ted_search_provider().search_notices(
+                keywords=keywords,
+                search_date=search_date,
+                limit=8,
+            )
+            if result.hits:
+                return result.hits, result.status, None, False
+            if result.error:
+                return [], "FAILED", result.error, False
+            return [], result.status, None, False
         except Exception as exc:
             return [], "FAILED", str(exc), False
 
@@ -399,6 +421,7 @@ def run_internet_source_search(
         access_mode=access_mode,
         max_sources=max_sources,
     )
+    matched_sources = _dedupe_ted_sources(matched_sources)
     strategy_rank = {
         InternetSourceFetchStrategy.TED_API.value: 0,
         InternetSourceFetchStrategy.WORLD_BANK_API.value: 1,
