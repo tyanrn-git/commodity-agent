@@ -258,6 +258,8 @@ def _match_counterparty_enrichment_fixture(text: str) -> dict:
 
 
 def _match_product_auto_fill_fixture(text: str) -> dict:
+    if "suggest specification schema only" in text.lower():
+        return _match_product_spec_scaffold_fixture(text)
     if re.search(r"гуар|guar", text, re.IGNORECASE):
         return {
             "reasoning": "Guar gum oilfield grade — viscosity is material variant spec.",
@@ -297,6 +299,78 @@ def _match_product_auto_fill_fixture(text: str) -> dict:
             "reasoning": "Base oil SN500 viscosity range from source.",
         }
     return {"parameters": [], "reasoning": "No additional specs found."}
+
+
+def _match_product_spec_scaffold_fixture(text: str) -> dict:
+    if re.search(r"гуар|guar", text, re.IGNORECASE):
+        return {
+            "reasoning": "Typical guar gum trading specification schema.",
+            "parameters": [
+                {
+                    "parameter_name": "mesh_size",
+                    "unit": "mesh",
+                    "status": "MISSING",
+                    "parameter_kind": "IDENTITY",
+                    "variation_materiality": "MATERIAL",
+                    "is_mandatory": True,
+                },
+                {
+                    "parameter_name": "viscosity",
+                    "unit": "cP",
+                    "status": "MISSING",
+                    "parameter_kind": "VARIANT",
+                    "variation_materiality": "MATERIAL",
+                    "is_mandatory": True,
+                },
+                {
+                    "parameter_name": "moisture",
+                    "unit": "%",
+                    "status": "MISSING",
+                    "parameter_kind": "VARIANT",
+                    "variation_materiality": "MATERIAL",
+                },
+            ],
+        }
+    if re.search(r"sn\s*500|base\s*oil", text, re.IGNORECASE):
+        return {
+            "reasoning": "Typical base oil SN500 specification schema.",
+            "parameters": [
+                {
+                    "parameter_name": "kinematic_viscosity_40c",
+                    "unit": "cSt",
+                    "status": "MISSING",
+                    "parameter_kind": "IDENTITY",
+                    "variation_materiality": "MATERIAL",
+                    "is_mandatory": True,
+                },
+                {
+                    "parameter_name": "flash_point",
+                    "unit": "C",
+                    "status": "MISSING",
+                    "parameter_kind": "VARIANT",
+                    "variation_materiality": "MATERIAL",
+                },
+            ],
+        }
+    return {
+        "reasoning": "Generic commodity specification schema.",
+        "parameters": [
+            {
+                "parameter_name": "grade",
+                "status": "MISSING",
+                "parameter_kind": "IDENTITY",
+                "variation_materiality": "MATERIAL",
+                "is_mandatory": True,
+            },
+            {
+                "parameter_name": "purity",
+                "unit": "%",
+                "status": "MISSING",
+                "parameter_kind": "VARIANT",
+                "variation_materiality": "MATERIAL",
+            },
+        ],
+    }
 
 
 def _match_product_assistant_fixture(text: str) -> dict:

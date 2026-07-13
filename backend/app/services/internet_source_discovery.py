@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 from app.ai.factory import get_ai_provider
 from app.ai.schemas import InternetSourceDiscoveryOutput
 from app.config import settings
-from app.domain.enums import AIUsageOperation, AuditAction, InternetSourceFetchStrategy, InternetSourceKind, MonitoringAccessMode
+from app.domain.enums import AIUsageOperation, AuditAction, AgentResultType, AgentType, InternetSourceFetchStrategy, InternetSourceKind, MonitoringAccessMode
 from app.domain.models import InternetSource, User
-from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings, log_ai_usage
+from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 from app.services.audit import log_audit
 from app.integrations.ted import is_ted_api_url, is_ted_web_portal
 from app.services.internet_source_catalog import create_internet_source, list_internet_sources, match_internet_sources
@@ -77,7 +78,16 @@ def _build_discovery_prompt(
     regions: list[str],
     access_mode: str | None,
     known_summary: str,
+    region_focused: bool = False,
 ) -> str:
+    if region_focused:
+        return (
+            f"Target regions: {', '.join(regions)}\n"
+            f"Preferred access mode: {access_mode or 'PUBLIC'}\n\n"
+            f"Known catalog (do NOT suggest these URLs again):\n{known_summary}\n\n"
+            "Suggest up to 5 NEW public procurement and commodity tender platforms "
+            "relevant to these regions (any commodity category)."
+        )
     return (
         f"Commodity product keywords: {', '.join(product_keywords)}\n"
         f"Expanded trade terms: {', '.join(expanded_keywords)}\n"
@@ -86,6 +96,25 @@ def _build_discovery_prompt(
         f"Known catalog (do NOT suggest these URLs again):\n{known_summary}\n\n"
         "Suggest up to 5 NEW procurement platforms where this commodity is tendered or traded."
     )
+
+
+def _should_skip_region_discovery(
+    db: Session,
+    *,
+    user: User,
+    regions: list[str],
+    access_mode: str | None,
+) -> bool:
+    if not regions:
+        return True
+    sources = list_internet_sources(db, user=user, active_only=True, include_inactive=False)
+    matched = match_internet_sources(
+        sources,
+        product_keywords=None,
+        regions=regions,
+        access_mode=access_mode,
+    )
+    return len(matched) >= MIN_MATCHED_BEFORE_SKIP
 
 
 def _should_skip_discovery(
@@ -164,12 +193,28 @@ def discover_and_register_sources(
     force: bool = False,
 ) -> SourceDiscoveryResult:
     keywords = [keyword.strip() for keyword in product_keywords if keyword and keyword.strip()]
-    if not keywords:
+    region_list = [region.strip() for region in (regions or []) if region and region.strip()]
+    region_focused = not keywords and bool(region_list)
+
+    if not keywords and not region_list:
         return SourceDiscoveryResult([], 0, None, True)
 
-    region_list = [region.strip() for region in (regions or []) if region and region.strip()]
+    discovery_keywords = keywords or ["commodity procurement", "public tenders"]
 
-    if not force and _should_skip_discovery(
+    if region_focused:
+        if not force and _should_skip_region_discovery(
+            db,
+            user=user,
+            regions=region_list,
+            access_mode=access_mode,
+        ):
+            return SourceDiscoveryResult(
+                [],
+                0,
+                "Каталог уже покрывает выбранные регионы — поиск новых площадок пропущен",
+                True,
+            )
+    elif not force and _should_skip_discovery(
         db,
         user=user,
         product_keywords=keywords,
@@ -180,7 +225,7 @@ def discover_and_register_sources(
 
     all_sources = list_internet_sources(db, user=user, active_only=False, include_inactive=True)
     known_index = _known_source_index(all_sources)
-    search_set = build_keyword_search_set(db, keywords)
+    search_set = build_keyword_search_set(db, discovery_keywords)
     expanded_keywords = search_set.expanded
 
     enforce_budget_or_raise(db, user=user)
@@ -188,28 +233,46 @@ def discover_and_register_sources(
     provider = get_ai_provider()
     model = budget_settings.preferred_default_model or settings.openai_default_model
 
-    discovery, usage = provider.structured_completion(
-        model=model,
-        system_prompt=DISCOVERY_SYSTEM_PROMPT,
-        user_prompt=_build_discovery_prompt(
-            product_keywords=keywords,
-            expanded_keywords=expanded_keywords,
-            regions=region_list,
-            access_mode=access_mode,
-            known_summary=_build_known_catalog_summary(all_sources),
-        ),
-        output_schema=InternetSourceDiscoveryOutput,
-        temperature=0.0,
-    )
-    log_ai_usage(
+    with tracked_agent_run(
         db,
         user=user,
-        model=usage.model,
-        operation=AIUsageOperation.CATALOG.value,
-        cost_usd=usage.cost_usd,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-    )
+        context=AgentExecutionContext(
+            agent_type=AgentType.TENDER_DISCOVERY.value,
+            task_type="source_discovery",
+            input_payload={
+                "product_keywords": keywords,
+                "regions": region_list,
+                "region_focused": region_focused,
+            },
+        ),
+    ) as agent:
+        discovery, usage = provider.structured_completion(
+            model=model,
+            system_prompt=DISCOVERY_SYSTEM_PROMPT,
+            user_prompt=_build_discovery_prompt(
+                product_keywords=discovery_keywords,
+                expanded_keywords=expanded_keywords,
+                regions=region_list,
+                access_mode=access_mode,
+                known_summary=_build_known_catalog_summary(all_sources),
+                region_focused=region_focused,
+            ),
+            output_schema=InternetSourceDiscoveryOutput,
+            temperature=0.0,
+        )
+        agent.attach_ai_usage(
+            model=usage.model,
+            operation=AIUsageOperation.CATALOG.value,
+            cost_usd=usage.cost_usd,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+        agent.record_result(
+            result_type=AgentResultType.SOURCE_DISCOVERY.value,
+            structured_payload=discovery.model_dump(mode="json"),
+            summary=discovery.notes,
+            applied=False,
+        )
 
     added: list[InternetSource] = []
     skipped = 0
@@ -222,7 +285,7 @@ def discover_and_register_sources(
         if _is_ted_discovery_candidate(candidate.base_url):
             ted_system = _find_system_ted_source(all_sources)
             if ted_system is not None:
-                merged_tags = _merge_product_tags(ted_system.product_tags or [], candidate.product_tags, keywords)
+                merged_tags = _merge_product_tags(ted_system.product_tags or [], candidate.product_tags, discovery_keywords)
                 if merged_tags != (ted_system.product_tags or []):
                     ted_system.product_tags = merged_tags
                     ted_system.search_hints = ted_system.search_hints or candidate.search_hints
@@ -231,7 +294,7 @@ def discover_and_register_sources(
 
         if normalized in known_index:
             existing = known_index[normalized]
-            merged_tags = _merge_product_tags(existing.product_tags or [], candidate.product_tags, keywords)
+            merged_tags = _merge_product_tags(existing.product_tags or [], candidate.product_tags, discovery_keywords)
             if merged_tags != (existing.product_tags or []):
                 existing.product_tags = merged_tags
                 existing.search_hints = existing.search_hints or candidate.search_hints
@@ -260,7 +323,7 @@ def discover_and_register_sources(
                 "access_mode": candidate.access_mode or MonitoringAccessMode.PUBLIC.value,
                 "fetch_strategy": fetch_strategy,
                 "regions": candidate.regions or region_list,
-                "product_tags": _merge_product_tags(candidate.product_tags, keywords, keywords),
+                "product_tags": _merge_product_tags(candidate.product_tags, discovery_keywords, discovery_keywords),
                 "languages": candidate.languages or ["en"],
                 "description": candidate.description or candidate.evidence,
                 "search_hints": candidate.search_hints,
@@ -280,8 +343,10 @@ def discover_and_register_sources(
             entity_type="InternetSourceDiscovery",
             entity_id=uuid.uuid4(),
             new_value={
-                "product_keywords": keywords,
+                "product_keywords": discovery_keywords,
+                "user_keywords": keywords,
                 "regions": region_list,
+                "region_focused": region_focused,
                 "added_count": len(added),
                 "skipped_existing": skipped,
                 "source_names": [source.name for source in added],

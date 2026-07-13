@@ -93,6 +93,16 @@ def match_internet_sources_route(
         )
         sources_discovered = len(discovery.added_sources)
         discovery_notes = discovery.ai_notes
+    elif not keywords and region_list and auto_discover:
+        discovery = discover_and_register_sources(
+            db,
+            user=current_user,
+            product_keywords=[],
+            regions=region_list,
+            access_mode=access_mode,
+        )
+        sources_discovered = len(discovery.added_sources)
+        discovery_notes = discovery.ai_notes
 
     expanded_keywords = expand_product_keywords(db, keywords) if keywords else []
     sources = list_internet_sources(

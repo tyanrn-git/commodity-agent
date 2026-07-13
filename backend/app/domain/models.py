@@ -1122,6 +1122,9 @@ class InternetSourceSearchRun(Base, TimestampMixin):
     regions: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     search_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     access_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    product_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="RUNNING", index=True)
     sources_matched: Mapped[int] = mapped_column(nullable=False, default=0)
     sources_scanned: Mapped[int] = mapped_column(nullable=False, default=0)
@@ -1134,6 +1137,7 @@ class InternetSourceSearchRun(Base, TimestampMixin):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     owner: Mapped["User"] = relationship(back_populates="internet_source_search_runs")
+    product: Mapped["Product | None"] = relationship()
     hits: Mapped[list["InternetSourceSearchHit"]] = relationship(back_populates="search_run")
 
 

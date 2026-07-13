@@ -24,6 +24,7 @@ from app.services.audit import log_audit
 from app.services.opportunity_status import initialize_opportunity_status
 from app.services.tender_attachments import attach_tender_link
 from app.services.tender_hit_evaluation import evaluate_tender_hit
+from app.services.product_catalog_search import find_catalog_product_by_keywords
 from app.ai.schemas import TenderSearchHitOutput
 
 FEASIBILITY_SYSTEM_PROMPT = """You assess whether a public tender can be executed profitably by a commodity trading desk.
@@ -205,11 +206,19 @@ def promote_search_hit_to_opportunity(db: Session, *, user: User, hit_id: uuid.U
         )
 
     economics = _feasibility_to_economics(feasibility)
+    normalized_product_id = run.product_id
+    if normalized_product_id is None:
+        lookup_terms = [fields.get("product"), *(run.product_keywords or [])]
+        matched_product = find_catalog_product_by_keywords(db, [term for term in lookup_terms if term])
+        if matched_product:
+            normalized_product_id = matched_product.id
+
     opportunity = Opportunity(
         owner_id=user.id,
         type=OpportunityType.AUTO_DISCOVERED.value,
         title=hit.title,
         raw_product_name=fields.get("product"),
+        normalized_product_id=normalized_product_id,
         buyer_or_supplier_hint=fields.get("buyer"),
         quantity_min=_parse_decimal(fields.get("quantity")),
         quantity_max=_parse_decimal(fields.get("quantity")),

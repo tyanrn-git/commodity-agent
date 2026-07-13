@@ -93,6 +93,7 @@ def create_product(
     aliases: list[str] | None = None,
     typical_units: list[str] | None = None,
     spec_parameters: list[SpecParameterOutput] | None = None,
+    auto_bootstrap_specs: bool = True,
 ) -> Product:
     name = normalized_name.strip()
     if not name:
@@ -124,6 +125,11 @@ def create_product(
     )
     db.commit()
     db.refresh(product)
+    if auto_bootstrap_specs and not spec_parameters:
+        from app.services.product_assistant import bootstrap_product_spec_scaffold
+
+        bootstrap_product_spec_scaffold(db, user=user, product=product)
+        db.refresh(product)
     return product
 
 

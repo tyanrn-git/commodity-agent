@@ -45,13 +45,13 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         agent_type=AgentType.PRODUCT_MATCHING.value,
         label="Product Matching",
         description="Resolve rough product descriptions to catalog products.",
-        allowed_task_types=("product_resolution",),
+        allowed_task_types=("product_resolution", "catalog_keyword_resolution"),
     ),
     AgentType.CATALOG_ASSISTANT.value: AgentCapability(
         agent_type=AgentType.CATALOG_ASSISTANT.value,
         label="Catalog Assistant",
         description="Assist with product catalog enrichment.",
-        allowed_task_types=("catalog_assist", "auto_fill"),
+        allowed_task_types=("catalog_assist", "auto_fill", "spec_scaffold"),
     ),
     AgentType.COUNTERPARTY_RESEARCH.value: AgentCapability(
         agent_type=AgentType.COUNTERPARTY_RESEARCH.value,

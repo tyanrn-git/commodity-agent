@@ -7,11 +7,21 @@ from sqlalchemy.orm import Session
 from app.ai.factory import get_ai_provider
 from app.ai.schemas import ProductAssistantOutput, ProductAutoFillOutput, ProductSpecChangeOutput
 from app.config import settings
-from app.domain.enums import AIUsageOperation, AuditAction, SpecParameterKind, SpecVariationMateriality
+from app.domain.enums import AIUsageOperation, AuditAction, SpecParameterKind, SpecVariationMateriality, AgentResultType, AgentType
 from app.domain.models import Product, ProductSpecificationProfile, User
-from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings, log_ai_usage
+from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings
 from app.services.audit import log_audit
 from app.services.product_catalog import get_product_detail, merge_discovered_specs
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
+
+PRODUCT_SPEC_SCAFFOLD_PROMPT = """You suggest a specification parameter SCHEMA for a commodity trading catalog product.
+Rules:
+- IDENTITY parameters define WHAT the product is (grade, botanical origin, polymer type).
+- VARIANT parameters are physico-chemical indicators that may differ between lots.
+- Do NOT invent numeric values or ranges — leave value_min/value_max/value_text empty.
+- Suggest 5-15 typical parameters traders use for this commodity.
+- Mark is_mandatory=true only for parameters essential to identify the product grade.
+"""
 
 PRODUCT_AUTO_FILL_PROMPT = """You enrich commodity product catalog specifications from trade documents.
 Classify each parameter:
@@ -84,24 +94,100 @@ def auto_enrich_product_from_text(
     )
     provider = get_ai_provider()
     model = budget_settings.preferred_default_model or settings.openai_default_model
-    output, usage = provider.structured_completion(
-        model=model,
-        system_prompt=PRODUCT_AUTO_FILL_PROMPT,
-        user_prompt=user_prompt,
-        output_schema=ProductAutoFillOutput,
-    )
-    log_ai_usage(
+    with tracked_agent_run(
         db,
         user=user,
-        operation=AIUsageOperation.CATALOG.value,
-        model=usage.model,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cost_usd=usage.cost_usd,
-    )
+        context=AgentExecutionContext(
+            agent_type=AgentType.CATALOG_ASSISTANT.value,
+            task_type="auto_fill",
+            input_payload={"product_id": str(product.id), "rough_product_name": rough_product_name},
+        ),
+    ) as agent:
+        output, usage = provider.structured_completion(
+            model=model,
+            system_prompt=PRODUCT_AUTO_FILL_PROMPT,
+            user_prompt=user_prompt,
+            output_schema=ProductAutoFillOutput,
+        )
+        agent.attach_ai_usage(
+            model=usage.model,
+            operation=AIUsageOperation.CATALOG.value,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cost_usd=usage.cost_usd,
+        )
+        agent.record_result(
+            result_type=AgentResultType.CATALOG_ASSISTANT.value,
+            structured_payload=output.model_dump(mode="json"),
+            summary=output.reasoning,
+            applied=False,
+        )
     merged = merge_discovered_specs(db, product.id, output.parameters)
     for profile in merged:
         profile.evidence_count = (profile.evidence_count or 0) + 1
+    db.commit()
+    return {
+        "parameters_added": len(merged),
+        "reasoning": output.reasoning,
+        "parameters": output.parameters,
+    }
+
+
+def bootstrap_product_spec_scaffold(
+    db: Session,
+    *,
+    user: User,
+    product: Product,
+) -> dict:
+    profiles = list(
+        db.scalars(
+            select(ProductSpecificationProfile).where(ProductSpecificationProfile.product_id == product.id)
+        )
+    )
+    if profiles:
+        return {"parameters_added": 0, "reasoning": "Product already has specification profiles"}
+
+    budget_settings = ensure_ai_budget_settings(db, user)
+    enforce_budget_or_raise(db, user)
+
+    user_prompt = (
+        f"Task: suggest specification schema only (no values).\n"
+        f"Product: {product.normalized_name}\n"
+        f"Category: {product.category}\n"
+        f"Aliases: {', '.join(product.aliases or []) or 'n/a'}"
+    )
+    provider = get_ai_provider()
+    model = budget_settings.preferred_default_model or settings.openai_default_model
+    with tracked_agent_run(
+        db,
+        user=user,
+        context=AgentExecutionContext(
+            agent_type=AgentType.CATALOG_ASSISTANT.value,
+            task_type="spec_scaffold",
+            input_payload={"product_id": str(product.id)},
+        ),
+    ) as agent:
+        output, usage = provider.structured_completion(
+            model=model,
+            system_prompt=PRODUCT_SPEC_SCAFFOLD_PROMPT,
+            user_prompt=user_prompt,
+            output_schema=ProductAutoFillOutput,
+        )
+        agent.attach_ai_usage(
+            model=usage.model,
+            operation=AIUsageOperation.CATALOG.value,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cost_usd=usage.cost_usd,
+        )
+        agent.record_result(
+            result_type=AgentResultType.CATALOG_ASSISTANT.value,
+            structured_payload=output.model_dump(mode="json"),
+            summary=output.reasoning,
+            applied=False,
+        )
+
+    merged = merge_discovered_specs(db, product.id, output.parameters)
     db.commit()
     return {
         "parameters_added": len(merged),
@@ -131,21 +217,34 @@ def chat_product_assistant(
     )
     provider = get_ai_provider()
     model = budget_settings.preferred_default_model or settings.openai_default_model
-    output, usage = provider.structured_completion(
-        model=model,
-        system_prompt=PRODUCT_ASSISTANT_PROMPT,
-        user_prompt=user_prompt,
-        output_schema=ProductAssistantOutput,
-    )
-    log_ai_usage(
+    with tracked_agent_run(
         db,
         user=user,
-        operation=AIUsageOperation.CATALOG.value,
-        model=usage.model,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cost_usd=usage.cost_usd,
-    )
+        context=AgentExecutionContext(
+            agent_type=AgentType.CATALOG_ASSISTANT.value,
+            task_type="catalog_assist",
+            input_payload={"product_id": str(product_id), "apply_changes": apply_changes},
+        ),
+    ) as agent:
+        output, usage = provider.structured_completion(
+            model=model,
+            system_prompt=PRODUCT_ASSISTANT_PROMPT,
+            user_prompt=user_prompt,
+            output_schema=ProductAssistantOutput,
+        )
+        agent.attach_ai_usage(
+            model=usage.model,
+            operation=AIUsageOperation.CATALOG.value,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cost_usd=usage.cost_usd,
+        )
+        agent.record_result(
+            result_type=AgentResultType.CATALOG_ASSISTANT.value,
+            structured_payload=output.model_dump(mode="json"),
+            summary=output.reply[:500] if output.reply else None,
+            applied=False,
+        )
 
     applied: list[str] = []
     if apply_changes:

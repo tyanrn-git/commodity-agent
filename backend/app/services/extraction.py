@@ -10,10 +10,11 @@ from app.ai.factory import get_ai_provider
 from app.ai.schemas import OpportunityExtractionOutput
 from app.config import settings
 from app.services.opportunity_status import transition_opportunity_status
-from app.domain.enums import AuditAction, ExtractionStatus, OpportunityStatus, SourceType, TaskStatus, TaskType
+from app.domain.enums import AuditAction, ExtractionStatus, OpportunityStatus, SourceType, TaskStatus, TaskType, AIUsageOperation, AgentResultType, AgentType
 from app.domain.models import ExtractionResult, Opportunity, Product, Source, Task, User
 from app.integrations.storage.base import ObjectStorage
-from app.services.ai_budget import enforce_budget_or_raise, log_ai_usage
+from app.services.ai_budget import enforce_budget_or_raise
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 from app.services.audit import log_audit
 from app.services.product_assistant import auto_enrich_product_from_text
 from app.services.document_parser import (
@@ -257,28 +258,43 @@ def extract_opportunity_from_source(
     for attempt in range(1, settings.ai_max_retries + 1):
         extraction.attempt_count = attempt
         try:
-            parsed, usage = provider.structured_completion(
-                model=model,
-                system_prompt=EXTRACTION_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                output_schema=OpportunityExtractionOutput,
-            )
+            with tracked_agent_run(
+                db,
+                user=user,
+                context=AgentExecutionContext(
+                    agent_type=AgentType.TENDER_QUALIFICATION.value,
+                    task_type="document_analysis",
+                    opportunity_id=source.opportunity_id,
+                    input_payload={"source_id": str(source.id), "attempt": attempt},
+                ),
+            ) as agent:
+                parsed, usage = provider.structured_completion(
+                    model=model,
+                    system_prompt=EXTRACTION_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    output_schema=OpportunityExtractionOutput,
+                )
+                agent.attach_ai_usage(
+                    model=usage.model,
+                    operation=AIUsageOperation.EXTRACTION.value,
+                    cost_usd=usage.cost_usd,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    opportunity_id=source.opportunity_id,
+                    source_id=source.id,
+                )
+                agent.record_result(
+                    result_type=AgentResultType.EXTRACTION.value,
+                    structured_payload=parsed.model_dump(mode="json"),
+                    summary=f"Extracted {len(parsed.missing_fields)} missing fields",
+                    requires_review=bool(parsed.missing_fields),
+                    applied=False,
+                )
             extraction.status = ExtractionStatus.SUCCESS.value
             extraction.model = usage.model
             extraction.raw_response = usage.raw_response
             extraction.extracted_data = parsed.model_dump(mode="json")
             extraction.missing_fields = parsed.missing_fields
-            log_ai_usage(
-                db,
-                user=user,
-                model=usage.model,
-                operation="extraction",
-                cost_usd=usage.cost_usd,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                opportunity_id=source.opportunity_id,
-                source_id=source.id,
-            )
             if parsed.missing_fields:
                 extraction.status = ExtractionStatus.NEEDS_REVIEW.value
             db.commit()

@@ -14,6 +14,8 @@ from app.config import settings
 from app.domain.enums import (
     AIUsageOperation,
     AuditAction,
+    AgentResultType,
+    AgentType,
     InternetSourceFetchStrategy,
     InternetSourceSearchHitStatus,
     InternetSourceSearchRunStatus,
@@ -25,7 +27,8 @@ from app.domain.models import (
     InternetSourceSearchRun,
     User,
 )
-from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings, log_ai_usage
+from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 from app.services.audit import log_audit
 from app.integrations.tender_feeds import (
     extract_html_keyword_hits,
@@ -41,6 +44,7 @@ from app.services.product_keyword_localization import (
 )
 from app.services.tender_hit_enrichment import enrich_tender_hits_with_ai
 from app.services.tender_hit_evaluation import evaluate_tender_hit
+from app.services.product_catalog_search import ensure_catalog_product_for_keywords, enrich_product_from_search_hits
 
 TENDER_SEARCH_SYSTEM_PROMPT = """You extract public tender and procurement opportunities from untrusted web page text.
 Rules:
@@ -490,6 +494,10 @@ def run_internet_source_search(
     db.add(run)
     db.flush()
 
+    catalog_product, _ = ensure_catalog_product_for_keywords(db, user=user, keywords=keywords)
+    run.product_id = catalog_product.id
+    db.flush()
+
     budget_settings = ensure_ai_budget_settings(db, user)
     provider = get_ai_provider()
     model = budget_settings.preferred_default_model or settings.openai_default_model
@@ -547,27 +555,45 @@ def run_internet_source_search(
                     fetch_error=fetch_error,
                     visited_urls=visited_urls,
                 )
-                result, usage = provider.structured_completion(
-                    model=model,
-                    system_prompt=TENDER_SEARCH_SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
-                    output_schema=TenderSearchOutput,
-                    temperature=0.0,
-                )
+                with tracked_agent_run(
+                    db,
+                    user=user,
+                    context=AgentExecutionContext(
+                        agent_type=AgentType.TENDER_DISCOVERY.value,
+                        task_type="search_run",
+                        internet_source_search_run_id=run.id,
+                        input_payload={
+                            "source_id": str(source.id),
+                            "source_name": source.name,
+                            "product_keywords": keywords,
+                        },
+                    ),
+                ) as agent:
+                    result, usage = provider.structured_completion(
+                        model=model,
+                        system_prompt=TENDER_SEARCH_SYSTEM_PROMPT,
+                        user_prompt=user_prompt,
+                        output_schema=TenderSearchOutput,
+                        temperature=0.0,
+                    )
+                    agent.attach_ai_usage(
+                        model=usage.model,
+                        operation=AIUsageOperation.MONITORING.value,
+                        cost_usd=usage.cost_usd,
+                        input_tokens=usage.input_tokens,
+                        output_tokens=usage.output_tokens,
+                    )
+                    agent.record_result(
+                        result_type=AgentResultType.TENDER_SEARCH.value,
+                        structured_payload=result.model_dump(mode="json"),
+                        summary=result.notes,
+                        applied=False,
+                    )
                 ai_calls += 1
                 ai_notes = result.notes
                 if visited_urls:
                     visited_note = f"Visited pages: {', '.join(visited_urls)}"
                     ai_notes = f"{ai_notes}\n{visited_note}".strip() if ai_notes else visited_note
-                log_ai_usage(
-                    db,
-                    user=user,
-                    model=usage.model,
-                    operation=AIUsageOperation.MONITORING.value,
-                    cost_usd=usage.cost_usd,
-                    input_tokens=usage.input_tokens,
-                    output_tokens=usage.output_tokens,
-                )
                 result_hits = _merge_tender_hits(collection.preliminary_hits, result.hits)
 
             if result_hits:
@@ -620,6 +646,18 @@ def run_internet_source_search(
         run.hits_new = hits_new
         run.opportunities_created = active_hits
         run.ai_calls = ai_calls
+        if run.product_id and hits_found:
+            persisted_hits = list(
+                db.scalars(
+                    select(InternetSourceSearchHit).where(InternetSourceSearchHit.search_run_id == run.id)
+                )
+            )
+            enrich_product_from_search_hits(
+                db,
+                user=user,
+                product_id=run.product_id,
+                hits=persisted_hits,
+            )
         run.status = InternetSourceSearchRunStatus.SUCCESS.value
         run.finished_at = datetime.now(timezone.utc)
         log_audit(

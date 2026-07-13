@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.ai.factory import get_ai_provider
 from app.ai.schemas import RFQDraftOutput
 from app.domain.enums import (
+    AIUsageOperation,
+    AgentResultType,
+    AgentType,
     ApprovalStatus,
     AuditAction,
     BindingClass,
@@ -28,7 +31,8 @@ from app.domain.models import (
     RFQTemplate,
     User,
 )
-from app.services.ai_budget import check_budget, ensure_ai_budget_settings, log_ai_usage
+from app.services.ai_budget import check_budget, ensure_ai_budget_settings
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 from app.services.audit import log_audit
 from app.services.counterparty import ensure_company_settings
 
@@ -328,23 +332,36 @@ def draft_rfq_with_ai(db: Session, *, user: User, rfq: RFQ) -> RFQ:
         f"Context: {json.dumps(context)}"
     )
     cfg = ensure_ai_budget_settings(db, user)
-    output, usage = provider.structured_completion(
-        model=cfg.preferred_default_model,
-        system_prompt="Adapt RFQ templates. Return subject and body only. Do not invent binding commitments.",
-        user_prompt=prompt,
-        output_schema=RFQDraftOutput,
-    )
-
-    log_ai_usage(
+    with tracked_agent_run(
         db,
         user=user,
-        model=usage.model,
-        operation="drafting",
-        cost_usd=usage.cost_usd,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        deal_id=deal.id,
-    )
+        context=AgentExecutionContext(
+            agent_type=AgentType.COMMUNICATION.value,
+            task_type="rfq_draft",
+            deal_id=deal.id,
+            input_payload={"rfq_id": str(rfq.id), "rfq_type": rfq.rfq_type},
+        ),
+    ) as agent:
+        output, usage = provider.structured_completion(
+            model=cfg.preferred_default_model,
+            system_prompt="Adapt RFQ templates. Return subject and body only. Do not invent binding commitments.",
+            user_prompt=prompt,
+            output_schema=RFQDraftOutput,
+        )
+        agent.attach_ai_usage(
+            model=usage.model,
+            operation=AIUsageOperation.DRAFTING.value,
+            cost_usd=usage.cost_usd,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            deal_id=deal.id,
+        )
+        agent.record_result(
+            result_type=AgentResultType.RFQ_DRAFT.value,
+            structured_payload=output.model_dump(mode="json"),
+            summary=output.subject[:200] if output.subject else None,
+            applied=False,
+        )
 
     rfq.subject = output.subject
     rfq.body = output.body

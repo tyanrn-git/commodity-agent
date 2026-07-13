@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session, joinedload
 from app.ai.factory import get_ai_provider
 from app.ai.schemas import CounterpartyEnrichmentOutput
 from app.config import settings
-from app.domain.enums import AIUsageOperation, AuditAction, CapabilityType, ConfirmationLevel
+from app.domain.enums import AIUsageOperation, AuditAction, CapabilityType, ConfirmationLevel, AgentResultType, AgentType
 from app.domain.models import Counterparty, CounterpartyCapability, Product, User
-from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings, log_ai_usage
+from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings
+from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 from app.services.audit import log_audit
 
 COUNTERPARTY_ENRICHMENT_SYSTEM_PROMPT = """You extract structured counterparty capabilities and contact hints from untrusted public or commercial text.
@@ -63,22 +64,34 @@ def enrich_counterparty_profile(
     user_prompt = _build_enrichment_context(counterparty, source_text)
     provider = get_ai_provider()
     model = budget_settings.preferred_default_model or settings.openai_default_model
-    output, usage = provider.structured_completion(
-        model=model,
-        system_prompt=COUNTERPARTY_ENRICHMENT_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        output_schema=CounterpartyEnrichmentOutput,
-    )
-
-    log_ai_usage(
+    with tracked_agent_run(
         db,
         user=user,
-        operation=AIUsageOperation.RESEARCH.value,
-        model=usage.model,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cost_usd=usage.cost_usd,
-    )
+        context=AgentExecutionContext(
+            agent_type=AgentType.COUNTERPARTY_RESEARCH.value,
+            task_type="counterparty_enrichment",
+            input_payload={"counterparty_id": str(counterparty.id)},
+        ),
+    ) as agent:
+        output, usage = provider.structured_completion(
+            model=model,
+            system_prompt=COUNTERPARTY_ENRICHMENT_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            output_schema=CounterpartyEnrichmentOutput,
+        )
+        agent.attach_ai_usage(
+            model=usage.model,
+            operation=AIUsageOperation.RESEARCH.value,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cost_usd=usage.cost_usd,
+        )
+        agent.record_result(
+            result_type=AgentResultType.COUNTERPARTY_ENRICHMENT.value,
+            structured_payload=output.model_dump(mode="json"),
+            summary=output.summary,
+            applied=False,
+        )
 
     created: list[CounterpartyCapability] = []
     allowed_types = {item.value for item in CapabilityType}

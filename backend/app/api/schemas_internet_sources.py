@@ -109,6 +109,7 @@ class InternetSourceSearchRunResponse(BaseModel):
 
     id: UUID
     owner_id: UUID
+    product_id: UUID | None = None
     product_keywords: list
     regions: list
     search_date: datetime
