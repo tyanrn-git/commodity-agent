@@ -171,12 +171,12 @@ export function parseRegionsInput(input: string | string[] | null | undefined): 
 }
 
 export function regionsToQuery(regions: string[]): string {
-  if (regions.length === 0) return WORLD_REGION.value;
+  if (regions.length === 0) return "";
   return regions.join(", ");
 }
 
 export function formatRegionsSummary(regions: string[]): string {
-  if (regions.length === 0) return WORLD_REGION.label;
+  if (regions.length === 0) return "Выберите регионы";
   if (regions.includes(WORLD_REGION.value)) return WORLD_REGION.label;
   if (regions.length <= 3) return regions.join(", ");
   return `${regions.slice(0, 3).join(", ")} +${regions.length - 3}`;

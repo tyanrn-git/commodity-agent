@@ -41,7 +41,7 @@ export function RegionPicker({ value, onChange, label = "Регион" }: Region
   }, []);
 
   function emit(next: Set<string>) {
-    if (next.size === 0 || next.has(WORLD_REGION.value)) {
+    if (next.has(WORLD_REGION.value)) {
       onChange([WORLD_REGION.value]);
       return;
     }
@@ -50,7 +50,7 @@ export function RegionPicker({ value, onChange, label = "Регион" }: Region
 
   function toggleWorld() {
     if (worldSelected) {
-      emit(new Set());
+      onChange([]);
       return;
     }
     emit(new Set([WORLD_REGION.value]));
@@ -79,13 +79,17 @@ export function RegionPicker({ value, onChange, label = "Регион" }: Region
     const next = new Set(selected);
     next.delete(WORLD_REGION.value);
 
+    const group = REGION_GROUPS.find((item) => item.value === groupValue);
+    if (group && next.has(groupValue)) {
+      next.delete(groupValue);
+      group.countries.forEach((country) => next.add(country.value));
+    }
+
     if (next.has(countryValue)) {
       next.delete(countryValue);
     } else {
       next.add(countryValue);
     }
-
-    const group = REGION_GROUPS.find((item) => item.value === groupValue);
     if (group) {
       const allCountriesSelected = group.countries.every((country) => next.has(country.value));
       if (allCountriesSelected) {
@@ -98,14 +102,23 @@ export function RegionPicker({ value, onChange, label = "Регион" }: Region
   }
 
   function isGroupChecked(groupId: string): boolean {
+    const group = REGION_GROUPS.find((item) => item.id === groupId);
+    if (!group) return false;
+    if (selected.has(group.value)) return true;
     const countries = groupCountryValues(groupId);
     return countries.length > 0 && countries.every((country) => selected.has(country));
   }
 
   function isGroupIndeterminate(groupId: string): boolean {
+    const group = REGION_GROUPS.find((item) => item.id === groupId);
+    if (!group || selected.has(group.value)) return false;
     const countries = groupCountryValues(groupId);
     const selectedCount = countries.filter((country) => selected.has(country)).length;
     return selectedCount > 0 && selectedCount < countries.length;
+  }
+
+  function isCountryChecked(countryValue: string, groupValue: string): boolean {
+    return selected.has(countryValue) || selected.has(groupValue);
   }
 
   return (
@@ -177,7 +190,6 @@ export function RegionPicker({ value, onChange, label = "Регион" }: Region
                       ref={(node) => {
                         if (node) node.indeterminate = groupIndeterminate;
                       }}
-                      disabled={worldSelected}
                       onChange={() => toggleGroup(group.id)}
                     />
                     {group.label}
@@ -193,8 +205,7 @@ export function RegionPicker({ value, onChange, label = "Регион" }: Region
                       >
                         <input
                           type="checkbox"
-                          checked={selected.has(country.value)}
-                          disabled={worldSelected}
+                          checked={isCountryChecked(country.value, group.value)}
                           onChange={() => toggleCountry(country.value, group.value)}
                         />
                         {country.label}
