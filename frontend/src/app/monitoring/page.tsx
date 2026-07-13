@@ -55,6 +55,7 @@ function TenderResultRow({
       buyer_name: null,
       product_name: null,
       volume: null,
+      estimated_value: null,
       destination: null,
       submission_deadline: null,
       delivery_deadline: null,
@@ -101,6 +102,7 @@ function TenderResultRow({
       <td style={tdStyle}>{row.buyer_name || "—"}</td>
       <td style={tdStyle}>{row.product_name || "—"}</td>
       <td style={tdStyle}>{row.volume || "—"}</td>
+      <td style={tdStyle}>{row.estimated_value || "—"}</td>
       <td style={tdStyle}>
         {row.submission_deadline ? formatDateTime(row.submission_deadline) : "—"}
         {row.submission_expired ? (
@@ -701,6 +703,7 @@ export default function MonitoringPage() {
                       <th style={thStyle}>Покупатель</th>
                       <th style={thStyle}>Товар</th>
                       <th style={thStyle}>Объём</th>
+                      <th style={thStyle}>Сумма</th>
                       <th style={thStyle}>Подача заявки</th>
                       <th style={thStyle}>Поставка</th>
                       <th style={thStyle}>Ссылка</th>

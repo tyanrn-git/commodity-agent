@@ -132,6 +132,7 @@ class TenderMonitoringRow(BaseModel):
     buyer_name: str | None = None
     product_name: str | None = None
     volume: str | None = None
+    estimated_value: str | None = None
     destination: str | None = None
     submission_deadline: str | None = None
     delivery_deadline: str | None = None

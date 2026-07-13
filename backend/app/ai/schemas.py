@@ -133,6 +133,8 @@ class TenderSearchHitOutput(BaseModel):
     product: str | None = None
     quantity: Decimal | None = None
     quantity_unit: str | None = None
+    estimated_value: Decimal | None = None
+    estimated_value_currency: str | None = None
     destination: str | None = None
     buyer: str | None = None
     deadline: str | None = Field(default=None, description="Submission deadline ISO date or datetime")
@@ -142,6 +144,26 @@ class TenderSearchHitOutput(BaseModel):
     body: str | None = None
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     evidence_excerpt: str | None = None
+
+
+class TenderHitEnrichmentOutput(BaseModel):
+    submission_deadline: str | None = Field(
+        default=None,
+        description="Bid submission deadline as ISO date YYYY-MM-DD or ISO datetime",
+    )
+    delivery_deadline: str | None = Field(
+        default=None,
+        description="Delivery or contract deadline as ISO date or datetime",
+    )
+    quantity: Decimal | None = None
+    quantity_unit: str | None = None
+    estimated_value: Decimal | None = Field(default=None, description="Contract budget or estimated total amount")
+    estimated_value_currency: str | None = Field(default=None, description="ISO currency code, e.g. EUR, USD")
+    buyer: str | None = None
+    product: str | None = None
+    destination: str | None = None
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    extraction_notes: str | None = None
 
 
 class TenderSearchOutput(BaseModel):

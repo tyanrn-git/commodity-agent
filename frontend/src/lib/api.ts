@@ -615,6 +615,7 @@ export type TenderMonitoringRow = {
   buyer_name: string | null;
   product_name: string | null;
   volume: string | null;
+  estimated_value: string | null;
   destination: string | null;
   submission_deadline: string | null;
   delivery_deadline: string | null;

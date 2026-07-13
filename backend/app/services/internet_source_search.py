@@ -38,6 +38,7 @@ from app.services.product_keyword_localization import (
     build_keyword_search_set,
     localize_keywords_for_source,
 )
+from app.services.tender_hit_enrichment import enrich_tender_hits_with_ai
 from app.services.tender_hit_evaluation import evaluate_tender_hit
 
 TENDER_SEARCH_SYSTEM_PROMPT = """You extract public tender and procurement opportunities from untrusted web page text.
@@ -173,6 +174,7 @@ def build_monitoring_row(hit: InternetSourceSearchHit) -> dict:
         "buyer_name": fields.get("buyer"),
         "product_name": fields.get("product"),
         "volume": fields.get("volume"),
+        "estimated_value": fields.get("estimated_value"),
         "destination": fields.get("destination"),
         "submission_deadline": fields.get("submission_deadline"),
         "delivery_deadline": fields.get("delivery_deadline"),
@@ -245,11 +247,15 @@ def _persist_hits(
                     "quantity": str(item.quantity) if item.quantity is not None else None,
                     "quantity_unit": item.quantity_unit,
                     "volume": evaluation.volume,
+                    "estimated_value": evaluation.estimated_value,
+                    "estimated_value_raw": str(item.estimated_value) if item.estimated_value is not None else None,
+                    "estimated_value_currency": item.estimated_value_currency,
                     "destination": item.destination,
                     "buyer": item.buyer,
                     "submission_deadline": submission_deadline.isoformat() if submission_deadline else None,
                     "delivery_deadline": delivery_deadline.isoformat() if delivery_deadline else None,
                     "submission_expired": evaluation.submission_expired,
+                    "deadline_known": evaluation.deadline_known,
                     "product_match": evaluation.product_match,
                     "product_match_reason": evaluation.product_match_reason,
                     "display_status": evaluation.display_status,
@@ -516,6 +522,18 @@ def run_internet_source_search(
                     output_tokens=usage.output_tokens,
                 )
                 result_hits = result.hits
+
+            if result_hits:
+                result_hits, enrich_calls = enrich_tender_hits_with_ai(
+                    db,
+                    user=user,
+                    hits=result_hits,
+                    product_keywords=keywords,
+                    provider=provider,
+                    model=model,
+                    verify_real=verify_real,
+                )
+                ai_calls += enrich_calls
 
             found, new_hits, active = _persist_hits(
                 db,

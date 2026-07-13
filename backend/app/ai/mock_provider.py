@@ -16,6 +16,7 @@ from app.ai.schemas import (
     ProductResolutionOutput,
     RFQDraftOutput,
     TenderFeasibilityOutput,
+    TenderHitEnrichmentOutput,
     TenderSearchOutput,
     InternetSourceDiscoveryOutput,
 )
@@ -92,6 +93,8 @@ class MockAIProvider(AIProvider):
             payload = _match_product_assistant_fixture(user_prompt)
         elif output_schema is TenderSearchOutput:
             payload = _match_tender_search_fixture(user_prompt)
+        elif output_schema is TenderHitEnrichmentOutput:
+            payload = _match_tender_hit_enrichment_fixture(user_prompt)
         elif output_schema is TenderFeasibilityOutput:
             payload = _match_tender_feasibility_fixture(user_prompt)
         elif output_schema is InternetSourceDiscoveryOutput:
@@ -315,6 +318,52 @@ def _match_product_assistant_fixture(text: str) -> dict:
     return {
         "reply": "Могу помочь изменить категорию, синонимы и спецификации. Уточните, что изменить.",
         "spec_changes": [],
+    }
+
+
+def _match_tender_hit_enrichment_fixture(text: str) -> dict:
+    submission = None
+    for pattern in (
+        r"submission deadline[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})",
+        r"deadline[:\s]+([0-9]{1,2}/[0-9]{1,2}/[0-9]{4})",
+        r"deadline[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})",
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            submission = match.group(1)
+            break
+
+    quantity = None
+    quantity_unit = None
+    qty_match = re.search(
+        r"(\d[\d\s.,]*)\s*(MT|metric\s*tons?|litres?|liters?|kg|units?)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if qty_match:
+        quantity = qty_match.group(1).replace(" ", "").replace(",", "")
+        quantity_unit = qty_match.group(2).upper().replace("METRIC TONS", "MT").replace("METRIC TON", "MT")
+
+    value = None
+    currency = None
+    value_match = re.search(
+        r"(?:estimated|contract|budget|value)[^\d]{0,20}(\d[\d\s.,]*)\s*(EUR|USD|GBP|INR)",
+        text,
+        re.IGNORECASE,
+    )
+    if value_match:
+        value = value_match.group(1).replace(" ", "").replace(",", "")
+        currency = value_match.group(2).upper()
+
+    return {
+        "submission_deadline": submission,
+        "delivery_deadline": None,
+        "quantity": quantity,
+        "quantity_unit": quantity_unit,
+        "estimated_value": value,
+        "estimated_value_currency": currency,
+        "confidence": 0.82 if submission or quantity or value else 0.4,
+        "extraction_notes": "Mock enrichment from notice text",
     }
 
 

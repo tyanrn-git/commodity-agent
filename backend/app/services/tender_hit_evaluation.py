@@ -8,13 +8,20 @@ from app.services.product_keyword_localization import hit_matches_assignment
 def _parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
+    cleaned = value.strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
+        try:
+            parsed = datetime.strptime(cleaned[:10], fmt)
+            return parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
     except ValueError:
         try:
             from datetime import date
 
-            parsed = datetime.combine(date.fromisoformat(value[:10]), datetime.min.time())
+            parsed = datetime.combine(date.fromisoformat(cleaned[:10]), datetime.min.time())
         except ValueError:
             return None
     if parsed.tzinfo is None:
@@ -31,6 +38,15 @@ def _format_volume(quantity, quantity_unit: str | None) -> str | None:
     return text
 
 
+def _format_estimated_value(value, currency: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if currency:
+        return f"{text} {currency}".strip()
+    return text
+
+
 @dataclass(frozen=True)
 class TenderHitEvaluation:
     product_match: bool
@@ -38,9 +54,11 @@ class TenderHitEvaluation:
     submission_deadline: datetime | None
     delivery_deadline: datetime | None
     submission_expired: bool
+    deadline_known: bool
     display_status: str
     display_status_label: str
     volume: str | None
+    estimated_value: str | None
 
 
 def evaluate_tender_hit(
@@ -60,6 +78,7 @@ def evaluate_tender_hit(
     submission_deadline = _parse_datetime(hit.submission_deadline or hit.deadline)
     delivery_deadline = _parse_datetime(hit.delivery_deadline)
     reference = reference_date if reference_date.tzinfo else reference_date.replace(tzinfo=timezone.utc)
+    deadline_known = submission_deadline is not None
     submission_expired = bool(submission_deadline and submission_deadline < reference)
 
     if not product_match:
@@ -68,6 +87,9 @@ def evaluate_tender_hit(
     elif submission_expired:
         display_status = "EXPIRED"
         display_status_label = "Срок подачи истёк"
+    elif not deadline_known:
+        display_status = "ACTIVE"
+        display_status_label = "Актуальный · срок не указан"
     else:
         display_status = "ACTIVE"
         display_status_label = "Актуальный"
@@ -78,7 +100,9 @@ def evaluate_tender_hit(
         submission_deadline=submission_deadline,
         delivery_deadline=delivery_deadline,
         submission_expired=submission_expired,
+        deadline_known=deadline_known,
         display_status=display_status,
         display_status_label=display_status_label,
         volume=_format_volume(hit.quantity, hit.quantity_unit),
+        estimated_value=_format_estimated_value(hit.estimated_value, hit.estimated_value_currency),
     )
