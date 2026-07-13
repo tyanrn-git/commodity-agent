@@ -29,6 +29,58 @@ def _normalize_tags(values: list[str] | None) -> list[str]:
     return result
 
 
+REGION_ALIAS_GROUPS: list[frozenset[str]] = [
+    frozenset({"russia", "россия", "ru", "rf", "cis", "eaeu", "eurasia"}),
+    frozenset({"eu", "europe", "европа", "european union"}),
+    frozenset({"india", "индия", "in"}),
+    frozenset({"china", "китай", "cn"}),
+    frozenset({"global", "world", "international", "глобальный"}),
+    frozenset({"africa", "африка"}),
+    frozenset({"asia", "азия"}),
+    frozenset({"usa", "us", "united states", "сша"}),
+]
+
+_GLOBAL_REGION_TOKENS = frozenset({"global", "world", "international", "глобальный"})
+
+
+def _expand_region_token(token: str) -> set[str]:
+    lowered = token.strip().lower()
+    if not lowered:
+        return set()
+    for group in REGION_ALIAS_GROUPS:
+        if lowered in group:
+            return set(group)
+    return {lowered}
+
+
+def expand_region_filters(region_filters: list[str]) -> set[str]:
+    expanded: set[str] = set()
+    for region in region_filters:
+        expanded |= _expand_region_token(region)
+    return expanded
+
+
+def _source_region_matches(source: InternetSource, region_filters: list[str]) -> bool:
+    if not region_filters:
+        return True
+
+    user_regions = expand_region_filters(region_filters)
+    user_wants_global = bool(user_regions & _GLOBAL_REGION_TOKENS)
+    source_regions = [str(region).lower() for region in (source.regions or [])]
+    if not source_regions:
+        return True
+
+    for source_region in source_regions:
+        expanded_source = _expand_region_token(source_region)
+        if expanded_source & _GLOBAL_REGION_TOKENS:
+            if user_wants_global:
+                return True
+            continue
+        if user_regions & expanded_source:
+            return True
+    return False
+
+
 def _source_visible_filter(user: User):
     return or_(InternetSource.owner_id.is_(None), InternetSource.owner_id == user.id)
 
@@ -117,19 +169,6 @@ def match_internet_sources(
         result = prepended + result
 
     return result
-
-
-def _source_region_matches(source: InternetSource, region_filters: list[str]) -> bool:
-    if not region_filters:
-        return True
-    source_regions = [str(region).lower() for region in (source.regions or [])]
-    if any(region == "global" for region in source_regions):
-        return True
-    return any(
-        region in source_region or source_region in region
-        for region in region_filters
-        for source_region in source_regions
-    )
 
 
 def _collect_universal_api_feeds(
@@ -300,6 +339,23 @@ SYSTEM_INTERNET_SOURCES: list[dict] = [
         "description": "World Bank open procurement notices API (fertilizer/urea-related bids).",
         "search_hints": "Search by qterm and filter by notice date.",
         "priority": 90,
+        "is_active": True,
+    },
+    {
+        "name": "ЕИС Закупки (zakupki.gov.ru)",
+        "base_url": "https://zakupki.gov.ru/epz/order/extendedsearch/search.html",
+        "source_kind": InternetSourceKind.GOV_REGISTRY.value,
+        "access_mode": MonitoringAccessMode.PUBLIC.value,
+        "fetch_strategy": InternetSourceFetchStrategy.HTML.value,
+        "regions": ["Russia", "CIS"],
+        "product_tags": [
+            "urea", "carbamide", "fertilizer", "карбамид", "chemicals", "commodities",
+            "transformer oil", "insulating oil", "трансформаторное масло", "oil", "procurement",
+        ],
+        "languages": ["ru", "en"],
+        "description": "Единая информационная система закупок РФ — поиск извещений по 44-ФЗ и 223-ФЗ.",
+        "search_hints": "https://zakupki.gov.ru/epz/order/extendedsearch/search.html — фильтр по наименованию объекта закупки.",
+        "priority": 92,
         "is_active": True,
     },
     {

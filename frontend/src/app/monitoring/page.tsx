@@ -383,7 +383,7 @@ export default function MonitoringPage() {
 
   async function loadLastSearchResults() {
     const runs = await apiClient.listInternetSourceSearchRuns();
-    if (runs.length === 0) return;
+    if (runs.length === 0) return false;
     const lastRun = runs[0];
     setSearchRun(lastRun);
     const hits = await apiClient.listInternetSourceSearchHits(lastRun.id);
@@ -397,14 +397,15 @@ export default function MonitoringPage() {
     if (lastRun.access_mode) {
       setCatalogAccessFilter(lastRun.access_mode);
     }
+    return true;
   }
 
   async function load() {
     try {
       const items = await apiClient.listMonitoringRules();
       setRules(items);
-      await loadCatalog();
       await loadLastSearchResults();
+      await loadCatalog();
       if (!activeRule && items.length > 0) {
         await selectRule(items[0]);
       } else if (activeRule) {
@@ -428,14 +429,18 @@ export default function MonitoringPage() {
   }, [router]);
 
   useEffect(() => {
-    loadCatalog().catch(() => setError("Ошибка загрузки каталога"));
-  }, [showInactiveSources]);
+    const timer = window.setTimeout(() => {
+      loadCatalog().catch(() => setError("Ошибка загрузки каталога"));
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [catalogProductFilter, catalogRegionFilter, catalogAccessFilter, showInactiveSources]);
 
   async function onRunAiSearch() {
     setSearchLoading(true);
     setError("");
     setMessage("");
     try {
+      await loadCatalog();
       const run = await apiClient.runInternetSourceSearch({
         product_keywords: catalogProductFilter
           .split(",")
@@ -445,7 +450,7 @@ export default function MonitoringPage() {
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
-        access_mode: "PUBLIC",
+        access_mode: catalogAccessFilter || "PUBLIC",
         verify_real: true,
       });
       setSearchRun(run);
@@ -625,8 +630,11 @@ export default function MonitoringPage() {
                 style={styles.input}
                 value={catalogRegionFilter}
                 onChange={(e) => setCatalogRegionFilter(e.target.value)}
-                placeholder="India, EU"
+                placeholder="Russia, EU, Global"
               />
+              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                Список источников обновляется автоматически при смене региона
+              </div>
             </div>
             <div>
               <label style={styles.label}>Доступ (фильтр)</label>

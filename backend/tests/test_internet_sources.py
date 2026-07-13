@@ -66,6 +66,22 @@ def test_match_transformer_oil_includes_ted(auth_client):
     assert "TED — EU Notices API" in names
 
 
+def test_match_russia_prefers_russian_sources(auth_client):
+    response = auth_client.get(
+        "/internet-sources/match",
+        params={
+            "product_keywords": "трансформаторное масло",
+            "regions": "Russia",
+            "auto_discover": False,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    names = [source["name"] for source in data["sources"]]
+    assert "ЕИС Закупки (zakupki.gov.ru)" in names
+    assert "TED — EU Notices API" not in names
+
+
 def test_create_user_internet_source(auth_client):
     created = auth_client.post(
         "/internet-sources",
