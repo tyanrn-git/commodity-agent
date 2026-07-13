@@ -88,6 +88,12 @@ function TenderResultRow({
         <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
           {hit.source_name || "источник"}
           {hit.confidence != null ? ` · ${Math.round(hit.confidence * 100)}%` : ""}
+          {Array.isArray(hit.extracted_fields?.visited_urls) &&
+          (hit.extracted_fields?.visited_urls as string[]).length > 0 ? (
+            <div style={{ marginTop: 4 }}>
+              Страницы: {(hit.extracted_fields?.visited_urls as string[]).join(", ")}
+            </div>
+          ) : null}
         </div>
       </td>
       <td style={{ ...tdStyle, color: statusColor(row.display_status), fontWeight: 600 }}>

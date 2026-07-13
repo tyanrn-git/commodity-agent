@@ -368,10 +368,14 @@ def _match_tender_hit_enrichment_fixture(text: str) -> dict:
 
 
 def _match_tender_search_fixture(text: str) -> dict:
-    if "Page text:" not in text and "[no page text available]" in text:
+    if "Page text from visited sections:" not in text and "Page text:" not in text and "[no page text available]" in text:
         return {"hits": [], "notes": "No page text available for extraction."}
 
-    page_text = text.split("Page text:\n", 1)[-1] if "Page text:\n" in text else text
+    page_text = text
+    if "Page text from visited sections:\n" in text:
+        page_text = text.split("Page text from visited sections:\n", 1)[-1]
+    elif "Page text:\n" in text:
+        page_text = text.split("Page text:\n", 1)[-1]
     keywords_match = re.search(r"Product keywords:\s*(.+?)(?:\n|$)", text)
     keywords = [
         part.strip()
