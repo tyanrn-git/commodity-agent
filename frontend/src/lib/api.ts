@@ -662,6 +662,19 @@ export type TenderMonitoringRow = {
   opportunity_id?: string | null;
 };
 
+export type TenderQualificationSummary = {
+  status: string;
+  qualified: boolean | null;
+  qualification_score: number | null;
+  summary: string | null;
+  rejection_reason: string | null;
+};
+
+export type MonitoringConfig = {
+  promotion_mode: "legacy" | "manual" | "auto_gates";
+  auto_qualify_score_threshold: number;
+};
+
 export type InternetSourceSearchHit = {
   id: string;
   search_run_id: string;
@@ -680,6 +693,7 @@ export type InternetSourceSearchHit = {
   updated_at: string;
   source_name: string | null;
   monitoring_row: TenderMonitoringRow | null;
+  qualification: TenderQualificationSummary | null;
 };
 
 export type AutomationSettings = {
@@ -1131,6 +1145,12 @@ export const apiClient = {
   listInternetSourceSearchRuns: () => api<InternetSourceSearchRun[]>("/internet-sources/search/runs"),
   listInternetSourceSearchHits: (runId: string) =>
     api<InternetSourceSearchHit[]>(`/internet-sources/search/runs/${runId}/hits`),
+  getMonitoringConfig: () => api<MonitoringConfig>("/internet-sources/monitoring-config"),
+  qualifySearchHit: (hitId: string) =>
+    api<{ hit: InternetSourceSearchHit; qualification: TenderQualificationSummary }>(
+      `/internet-sources/search/hits/${hitId}/qualify`,
+      { method: "POST" }
+    ),
   promoteSearchHit: (hitId: string) =>
     api<{
       hit: InternetSourceSearchHit;

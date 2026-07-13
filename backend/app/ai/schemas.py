@@ -191,6 +191,19 @@ class InternetSourceDiscoveryOutput(BaseModel):
     notes: str | None = None
 
 
+class TenderQualificationOutput(BaseModel):
+    qualified: bool
+    qualification_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    summary: str
+    product_fit: str | None = None
+    route_fit: str | None = None
+    deadline_feasible: bool = True
+    missing_fields: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    rejection_reason: str | None = None
+
+
 class TenderFeasibilityOutput(BaseModel):
     feasible: bool
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)

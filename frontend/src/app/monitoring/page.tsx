@@ -8,6 +8,7 @@ import {
   InternetSource,
   InternetSourceSearchHit,
   InternetSourceSearchRun,
+  MonitoringConfig,
   MonitoringRule,
   MonitoringRun,
   MonitoredPublication,
@@ -46,12 +47,18 @@ function statusColor(status: string) {
 function TenderResultRow({
   hit,
   onPromote,
+  onQualify,
   promoting,
+  qualifying,
+  promotionMode,
   catalogProductId,
 }: {
   hit: InternetSourceSearchHit;
   onPromote: (hitId: string) => Promise<void>;
+  onQualify: (hitId: string) => Promise<void>;
   promoting: boolean;
+  qualifying: boolean;
+  promotionMode: MonitoringConfig["promotion_mode"];
   catalogProductId?: string | null;
 }) {
   const row: TenderMonitoringRow =
@@ -82,12 +89,23 @@ function TenderResultRow({
     typeof hit.extracted_fields?.catalog_params_added === "number"
       ? hit.extracted_fields.catalog_params_added
       : 0;
+  const qualification = hit.qualification;
+  const isLegacyMode = promotionMode === "legacy";
+  const canQualify =
+    !isLegacyMode &&
+    row.product_match &&
+    !row.submission_expired &&
+    row.display_status === "ACTIVE" &&
+    !hit.opportunity_id &&
+    hit.status === "FOUND" &&
+    !qualification?.qualified;
   const canPromote =
     row.product_match &&
     !row.submission_expired &&
     row.display_status === "ACTIVE" &&
     !hit.opportunity_id &&
-    hit.status === "FOUND";
+    hit.status === "FOUND" &&
+    (isLegacyMode || qualification?.qualified === true);
 
   return (
     <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
@@ -148,21 +166,46 @@ function TenderResultRow({
           <Link href={`/opportunities/${hit.opportunity_id}`} style={styles.link}>
             Открыть
           </Link>
-        ) : canPromote ? (
-          <button
-            type="button"
-            style={styles.secondaryButton}
-            disabled={promoting}
-            onClick={() => onPromote(hit.id)}
-          >
-            {promoting ? "AI-оценка..." : "В возможности"}
-          </button>
-        ) : feasibility && feasibility.feasible === false ? (
-          <span style={{ fontSize: 12, color: "#991b1b" }}>Нереализуемо</span>
         ) : (
-          "—"
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+            {canQualify ? (
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                disabled={qualifying || promoting}
+                onClick={() => onQualify(hit.id)}
+              >
+                {qualifying ? "Квалификация..." : "Квалифицировать"}
+              </button>
+            ) : null}
+            {canPromote ? (
+              <button
+                type="button"
+                style={styles.button}
+                disabled={promoting || qualifying}
+                onClick={() => onPromote(hit.id)}
+              >
+                {promoting ? "Перенос..." : isLegacyMode ? "В возможности" : "Создать возможность"}
+              </button>
+            ) : null}
+            {!canQualify && !canPromote && qualification && qualification.qualified === false ? (
+              <span style={{ fontSize: 12, color: "#991b1b" }}>Не квалифицирован</span>
+            ) : !canQualify && !canPromote && feasibility && feasibility.feasible === false ? (
+              <span style={{ fontSize: 12, color: "#991b1b" }}>Нереализуемо</span>
+            ) : !canQualify && !canPromote ? (
+              "—"
+            ) : null}
+          </div>
         )}
-        {feasibility?.summary ? (
+        {qualification?.summary && !isLegacyMode ? (
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>
+            Квалификация: {qualification.summary}
+            {qualification.qualification_score != null
+              ? ` (${Math.round(qualification.qualification_score * 100)}%)`
+              : ""}
+          </div>
+        ) : null}
+        {feasibility?.summary && isLegacyMode ? (
           <div style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>{feasibility.summary}</div>
         ) : null}
         {feasibility?.supplier_hint ? (
@@ -373,6 +416,11 @@ export default function MonitoringPage() {
   const [searchHits, setSearchHits] = useState<InternetSourceSearchHit[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [promotingHitId, setPromotingHitId] = useState<string | null>(null);
+  const [qualifyingHitId, setQualifyingHitId] = useState<string | null>(null);
+  const [monitoringConfig, setMonitoringConfig] = useState<MonitoringConfig>({
+    promotion_mode: "legacy",
+    auto_qualify_score_threshold: 0.65,
+  });
   const [activeRule, setActiveRule] = useState<MonitoringRule | null>(null);
   const [publications, setPublications] = useState<MonitoredPublication[]>([]);
   const [lastRun, setLastRun] = useState<MonitoringRun | null>(null);
@@ -456,7 +504,11 @@ export default function MonitoringPage() {
 
   async function load() {
     try {
-      const items = await apiClient.listMonitoringRules();
+      const [items, config] = await Promise.all([
+        apiClient.listMonitoringRules(),
+        apiClient.getMonitoringConfig(),
+      ]);
+      setMonitoringConfig(config);
       setRules(items);
       await loadLastSearchResults();
       await loadCatalog();
@@ -518,6 +570,24 @@ export default function MonitoringPage() {
       setError(err instanceof Error ? err.message : "Ошибка AI-поиска");
     } finally {
       setSearchLoading(false);
+    }
+  }
+
+  async function onQualifyHit(hitId: string) {
+    setQualifyingHitId(hitId);
+    setError("");
+    try {
+      const result = await apiClient.qualifySearchHit(hitId);
+      setSearchHits((current) => current.map((item) => (item.id === hitId ? result.hit : item)));
+      setMessage(
+        result.qualification.qualified
+          ? `Тендер квалифицирован (${Math.round((result.qualification.qualification_score || 0) * 100)}%)`
+          : result.qualification.rejection_reason || result.qualification.summary || "Тендер не квалифицирован"
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка квалификации");
+    } finally {
+      setQualifyingHitId(null);
     }
   }
 
@@ -660,9 +730,15 @@ export default function MonitoringPage() {
           <h2 style={{ marginTop: 0 }}>Каталог источников</h2>
           <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
             AI сам ищет новые площадки под ваш товар, добавляет их в каталог и запоминает для
-            следующих поисков. Уже известные источники повторно не анализируются. Результаты
-            тендеров сохраняются здесь; перенос в «Возможности» — вручную после AI-оценки
-            реализуемости.
+            следующих поисков. Уже известные источники повторно не анализируются. Режим продвижения:{" "}
+            <strong>
+              {monitoringConfig.promotion_mode === "legacy"
+                ? "legacy (AI-реализуемость)"
+                : monitoringConfig.promotion_mode === "manual"
+                  ? "квалификация → ручной перенос"
+                  : "авто-квалификация с порогом"}
+            </strong>
+            .
           </p>
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
             <div>
@@ -777,7 +853,10 @@ export default function MonitoringPage() {
                           key={hit.id}
                           hit={hit}
                           promoting={promotingHitId === hit.id}
+                          qualifying={qualifyingHitId === hit.id}
+                          promotionMode={monitoringConfig.promotion_mode}
                           onPromote={onPromoteHit}
+                          onQualify={onQualifyHit}
                           catalogProductId={searchRun?.product_id}
                         />
                       ))}
@@ -886,11 +965,12 @@ export default function MonitoringPage() {
           </form>
         </div>
 
-        <div style={styles.card}>
-          <h2 style={{ marginTop: 0 }}>Правило мониторинга (legacy)</h2>
-          <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
-            Старый режим с коннектором на один URL. Новый поток — AI-поиск по каталогу источников
-            (следующий шаг).
+        <details style={styles.card}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 18 }}>
+            Правило мониторинга (legacy)
+          </summary>
+          <p style={{ fontSize: 13, color: "#64748b", marginTop: 12 }}>
+            Старый режим с коннектором на один URL. Основной поток — AI-поиск по каталогу источников выше.
           </p>
           <form onSubmit={onCreateRule}>
             <label style={styles.label}>Название</label>
@@ -951,10 +1031,11 @@ export default function MonitoringPage() {
             </button>
           </form>
           {error ? <div style={{ ...styles.error, marginTop: 12 }}>{error}</div> : null}
-        </div>
+        </details>
 
-        <div style={styles.card}>
-          <h2 style={{ marginTop: 0 }}>Правила</h2>
+        <details style={styles.card}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 18 }}>Правила и публикации (legacy)</summary>
+          <h3 style={{ marginTop: 16 }}>Правила</h3>
           {rules.length === 0 ? (
             <p style={{ color: "#64748b" }}>Нет правил мониторинга</p>
           ) : (
@@ -984,11 +1065,10 @@ export default function MonitoringPage() {
               ))}
             </ul>
           )}
-        </div>
 
         {activeRule ? (
-          <div style={styles.card}>
-            <h2 style={{ marginTop: 0 }}>{activeRule.name}</h2>
+          <div style={{ marginTop: 16 }}>
+            <h3 style={{ marginTop: 0 }}>{activeRule.name}</h3>
             <div style={{ fontSize: 14, marginBottom: 12 }}>
               <div>Источник: {activeRule.source_url}</div>
               <div>Доступ: {ACCESS_MODE_LABELS[activeRule.access_mode] || activeRule.access_mode}</div>
@@ -1030,8 +1110,8 @@ export default function MonitoringPage() {
         ) : null}
 
         {publications.length > 0 ? (
-          <div style={styles.card}>
-            <h2 style={{ marginTop: 0 }}>Публикации</h2>
+          <div style={{ marginTop: 16 }}>
+            <h3 style={{ marginTop: 0 }}>Публикации</h3>
             <ul style={{ paddingLeft: 20 }}>
               {publications.map((pub) => (
                 <li key={pub.id} style={{ marginBottom: 10 }}>
@@ -1052,6 +1132,7 @@ export default function MonitoringPage() {
             </ul>
           </div>
         ) : null}
+        </details>
 
         {message ? (
           <p style={{ padding: 12, background: "#f1f5f9", borderRadius: 6 }}>{message}</p>

@@ -31,6 +31,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_DEFAULT_MODEL: ${OPENAI_DEFAULT_MODEL:-gpt-4o-mini}
       OPENAI_FALLBACK_MODEL: ${OPENAI_FALLBACK_MODEL:-gpt-4o}
+      TENDER_PROMOTION_MODE: ${TENDER_PROMOTION_MODE:-legacy}
+      AUTO_QUALIFY_SCORE_THRESHOLD: ${AUTO_QUALIFY_SCORE_THRESHOLD:-0.65}
     volumes:
       - ./backend:/app
       - storage_data:/app/data/storage

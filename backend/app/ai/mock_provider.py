@@ -17,6 +17,7 @@ from app.ai.schemas import (
     RFQDraftOutput,
     TenderFeasibilityOutput,
     TenderHitEnrichmentOutput,
+    TenderQualificationOutput,
     TenderSearchOutput,
     InternetSourceDiscoveryOutput,
 )
@@ -97,6 +98,8 @@ class MockAIProvider(AIProvider):
             payload = _match_tender_hit_enrichment_fixture(user_prompt)
         elif output_schema is TenderFeasibilityOutput:
             payload = _match_tender_feasibility_fixture(user_prompt)
+        elif output_schema is TenderQualificationOutput:
+            payload = _match_tender_qualification_fixture(user_prompt)
         elif output_schema is InternetSourceDiscoveryOutput:
             payload = _match_internet_source_discovery_fixture(user_prompt)
         else:
@@ -486,6 +489,34 @@ def _match_tender_search_fixture(text: str) -> dict:
             for line in lines[:3]
         ],
         "notes": f"Extracted from real page text ({source_name})",
+    }
+
+
+def _match_tender_qualification_fixture(text: str) -> dict:
+    if re.search(r"office furniture|chairs and desks", text, re.IGNORECASE):
+        return {
+            "qualified": False,
+            "qualification_score": 0.12,
+            "confidence": 0.88,
+            "summary": "Предмет закупки не относится к commodity-трейдингу.",
+            "product_fit": "Нет соответствия товарному профилю",
+            "route_fit": None,
+            "deadline_feasible": True,
+            "missing_fields": [],
+            "risks": ["Несоответствие предмета закупки"],
+            "rejection_reason": "Office furniture is outside commodity scope",
+        }
+    return {
+        "qualified": True,
+        "qualification_score": 0.84,
+        "confidence": 0.8,
+        "summary": "Тендер соответствует товарному запросу, сроки выглядят рабочими.",
+        "product_fit": "Соответствует ключевым словам поиска",
+        "route_fit": "Направление поставки указано или не критично",
+        "deadline_feasible": True,
+        "missing_fields": [],
+        "risks": [],
+        "rejection_reason": None,
     }
 
 

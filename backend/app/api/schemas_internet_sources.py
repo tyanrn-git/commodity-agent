@@ -147,6 +147,14 @@ class InternetSourceSearchRunResponse(BaseModel):
         )
 
 
+class TenderQualificationSummary(BaseModel):
+    status: str
+    qualified: bool | None = None
+    qualification_score: float | None = None
+    summary: str | None = None
+    rejection_reason: str | None = None
+
+
 class TenderMonitoringRow(BaseModel):
     buyer_name: str | None = None
     product_name: str | None = None
@@ -174,6 +182,16 @@ class TenderHitPromoteResponse(BaseModel):
     economics_preview: str | None = None
 
 
+class TenderHitQualifyResponse(BaseModel):
+    hit: "InternetSourceSearchHitResponse"
+    qualification: TenderQualificationSummary
+
+
+class MonitoringConfigResponse(BaseModel):
+    promotion_mode: str
+    auto_qualify_score_threshold: float
+
+
 class InternetSourceSearchHitResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -194,6 +212,29 @@ class InternetSourceSearchHitResponse(BaseModel):
     updated_at: datetime
     source_name: str | None = None
     monitoring_row: TenderMonitoringRow | None = None
+    qualification: TenderQualificationSummary | None = None
+
+    @classmethod
+    def _qualification_summary(cls, hit) -> TenderQualificationSummary | None:
+        record = getattr(hit, "qualified_requirement", None)
+        if record is not None:
+            return TenderQualificationSummary(
+                status=record.status,
+                qualified=record.qualified,
+                qualification_score=float(record.qualification_score) if record.qualification_score is not None else None,
+                summary=record.summary,
+                rejection_reason=record.rejection_reason,
+            )
+        payload = (hit.extracted_fields or {}).get("qualification")
+        if isinstance(payload, dict) and payload:
+            return TenderQualificationSummary(
+                status="QUALIFIED" if payload.get("qualified") else "REJECTED",
+                qualified=payload.get("qualified"),
+                qualification_score=payload.get("qualification_score"),
+                summary=payload.get("summary"),
+                rejection_reason=payload.get("rejection_reason"),
+            )
+        return None
 
     @classmethod
     def from_model(cls, hit, *, source_name: str | None = None) -> "InternetSourceSearchHitResponse":
@@ -206,6 +247,7 @@ class InternetSourceSearchHitResponse(BaseModel):
                 "source_name": source_name,
                 "confidence": confidence,
                 "monitoring_row": TenderMonitoringRow(**build_monitoring_row(hit)),
+                "qualification": cls._qualification_summary(hit),
             }
         )
 

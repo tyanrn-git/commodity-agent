@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.factory import get_ai_provider
@@ -16,8 +17,10 @@ from app.domain.enums import (
     OpportunityType,
     AgentResultType,
     AgentType,
+    QualifiedRequirementStatus,
+    TenderPromotionMode,
 )
-from app.domain.models import InternetSourceSearchHit, Opportunity, User
+from app.domain.models import InternetSourceSearchHit, Opportunity, QualifiedRequirement, User
 from app.services.ai_budget import enforce_budget_or_raise, ensure_ai_budget_settings
 from app.services.agent_runtime import AgentExecutionContext, tracked_agent_run
 from app.services.audit import log_audit
@@ -25,6 +28,7 @@ from app.services.opportunity_status import initialize_opportunity_status
 from app.services.tender_attachments import attach_tender_link
 from app.services.tender_hit_evaluation import evaluate_tender_hit
 from app.services.product_catalog_search import find_catalog_product_by_keywords
+from app.services.tender_qualification import get_promotion_mode, passes_auto_gates, qualify_search_hit
 from app.ai.schemas import TenderSearchHitOutput
 
 FEASIBILITY_SYSTEM_PROMPT = """You assess whether a public tender can be executed profitably by a commodity trading desk.
@@ -63,6 +67,42 @@ def get_search_hit(db: Session, *, user: User, hit_id: uuid.UUID) -> InternetSou
     if hit is None or hit.search_run.owner_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Search hit not found")
     return hit
+
+
+def _validate_hit_for_promotion(hit: InternetSourceSearchHit) -> dict:
+    fields = dict(hit.extracted_fields or {})
+    if hit.status in {InternetSourceSearchHitStatus.SKIPPED.value, InternetSourceSearchHitStatus.FILTERED_OUT.value}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Тендер отфильтрован и не может быть перенесён")
+    if fields.get("submission_expired"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Срок подачи заявки истёк")
+    if not fields.get("product_match", True):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Предмет тендера не соответствует заданию")
+    return fields
+
+
+def _evaluate_hit_active(hit: InternetSourceSearchHit, run, fields: dict) -> None:
+    tender_item = TenderSearchHitOutput(
+        title=hit.title,
+        url=hit.canonical_url,
+        product=fields.get("product"),
+        buyer=fields.get("buyer"),
+        destination=fields.get("destination"),
+        deadline=fields.get("submission_deadline"),
+        submission_deadline=fields.get("submission_deadline"),
+        delivery_deadline=fields.get("delivery_deadline"),
+        body=fields.get("body"),
+        confidence=float(hit.confidence or 0.5),
+        evidence_excerpt=hit.evidence_excerpt,
+        quantity=_parse_decimal(fields.get("quantity")),
+        quantity_unit=fields.get("quantity_unit"),
+    )
+    evaluation = evaluate_tender_hit(
+        tender_item,
+        user_keywords=list(run.product_keywords or []),
+        reference_date=datetime.now(timezone.utc),
+    )
+    if evaluation.display_status != "ACTIVE":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=evaluation.product_match_reason)
 
 
 def _build_feasibility_prompt(*, hit: InternetSourceSearchHit, run) -> str:
@@ -110,47 +150,80 @@ def _feasibility_to_economics(result: TenderFeasibilityOutput) -> dict:
     }
 
 
-def promote_search_hit_to_opportunity(db: Session, *, user: User, hit_id: uuid.UUID) -> tuple[InternetSourceSearchHit, Opportunity]:
-    hit = get_search_hit(db, user=user, hit_id=hit_id)
-    run = hit.search_run
-    fields = dict(hit.extracted_fields or {})
+def _qualification_to_economics(record: QualifiedRequirement) -> dict:
+    return {
+        "data_completeness": "PARTIAL",
+        "source": "tender_qualification",
+        "feasibility_summary": record.summary,
+        "confidence": float(record.confidence or 0.0),
+        "qualification_score": float(record.qualification_score or 0.0),
+        "risks": (record.structured_payload or {}).get("risks") or [],
+    }
 
-    if hit.opportunity_id:
-        opportunity = db.get(Opportunity, hit.opportunity_id)
-        if opportunity is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked opportunity not found")
-        return hit, opportunity
 
-    if hit.status in {InternetSourceSearchHitStatus.SKIPPED.value, InternetSourceSearchHitStatus.FILTERED_OUT.value}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Тендер отфильтрован и не может быть перенесён")
-    if fields.get("submission_expired"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Срок подачи заявки истёк")
-    if not fields.get("product_match", True):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Предмет тендера не соответствует заданию")
+def _create_opportunity_from_hit(
+    db: Session,
+    *,
+    user: User,
+    hit: InternetSourceSearchHit,
+    run,
+    fields: dict,
+    economics: dict,
+    notes: str,
+) -> Opportunity:
+    normalized_product_id = run.product_id
+    if normalized_product_id is None:
+        lookup_terms = [fields.get("product"), *(run.product_keywords or [])]
+        matched_product = find_catalog_product_by_keywords(db, [term for term in lookup_terms if term])
+        if matched_product:
+            normalized_product_id = matched_product.id
 
-    tender_item = TenderSearchHitOutput(
+    opportunity = Opportunity(
+        owner_id=user.id,
+        type=OpportunityType.AUTO_DISCOVERED.value,
         title=hit.title,
-        url=hit.canonical_url,
-        product=fields.get("product"),
-        buyer=fields.get("buyer"),
-        destination=fields.get("destination"),
-        deadline=fields.get("submission_deadline"),
-        submission_deadline=fields.get("submission_deadline"),
-        delivery_deadline=fields.get("delivery_deadline"),
-        body=fields.get("body"),
-        confidence=float(hit.confidence or 0.5),
-        evidence_excerpt=hit.evidence_excerpt,
-        quantity=_parse_decimal(fields.get("quantity")),
+        raw_product_name=fields.get("product"),
+        normalized_product_id=normalized_product_id,
+        buyer_or_supplier_hint=fields.get("buyer"),
+        quantity_min=_parse_decimal(fields.get("quantity")),
+        quantity_max=_parse_decimal(fields.get("quantity")),
         quantity_unit=fields.get("quantity_unit"),
+        destination_hint=fields.get("destination"),
+        deadline=_parse_datetime(fields.get("submission_deadline")),
+        quote_deadline=_parse_datetime(fields.get("submission_deadline")),
+        delivery_deadline=_parse_datetime(fields.get("delivery_deadline")),
+        source_url=hit.canonical_url,
+        status=OpportunityStatus.NEW.value,
+        indicative_economics=economics,
+        notes=notes,
     )
-    evaluation = evaluate_tender_hit(
-        tender_item,
-        user_keywords=list(run.product_keywords or []),
-        reference_date=datetime.now(timezone.utc),
-    )
-    if evaluation.display_status != "ACTIVE":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=evaluation.product_match_reason)
+    db.add(opportunity)
+    db.flush()
+    attach_tender_link(db, user=user, opportunity=opportunity, url=hit.canonical_url)
+    initialize_opportunity_status(db, opportunity=opportunity, actor=user, actor_type="AI")
+    hit.opportunity_id = opportunity.id
+    hit.status = InternetSourceSearchHitStatus.OPPORTUNITY_CREATED.value
+    run.opportunities_created = int(run.opportunities_created or 0) + 1
+    return opportunity
 
+
+def _get_qualification_record(db: Session, *, user: User, hit: InternetSourceSearchHit) -> QualifiedRequirement | None:
+    return db.scalar(
+        select(QualifiedRequirement).where(
+            QualifiedRequirement.internet_source_search_hit_id == hit.id,
+            QualifiedRequirement.owner_id == user.id,
+        )
+    )
+
+
+def _promote_legacy(
+    db: Session,
+    *,
+    user: User,
+    hit: InternetSourceSearchHit,
+    run,
+    fields: dict,
+) -> tuple[InternetSourceSearchHit, Opportunity]:
     enforce_budget_or_raise(db, user=user)
     budget_settings = ensure_ai_budget_settings(db, user)
     provider = get_ai_provider()
@@ -206,45 +279,19 @@ def promote_search_hit_to_opportunity(db: Session, *, user: User, hit_id: uuid.U
         )
 
     economics = _feasibility_to_economics(feasibility)
-    normalized_product_id = run.product_id
-    if normalized_product_id is None:
-        lookup_terms = [fields.get("product"), *(run.product_keywords or [])]
-        matched_product = find_catalog_product_by_keywords(db, [term for term in lookup_terms if term])
-        if matched_product:
-            normalized_product_id = matched_product.id
-
-    opportunity = Opportunity(
-        owner_id=user.id,
-        type=OpportunityType.AUTO_DISCOVERED.value,
-        title=hit.title,
-        raw_product_name=fields.get("product"),
-        normalized_product_id=normalized_product_id,
-        buyer_or_supplier_hint=fields.get("buyer"),
-        quantity_min=_parse_decimal(fields.get("quantity")),
-        quantity_max=_parse_decimal(fields.get("quantity")),
-        quantity_unit=fields.get("quantity_unit"),
-        destination_hint=fields.get("destination"),
-        deadline=_parse_datetime(fields.get("submission_deadline")),
-        quote_deadline=_parse_datetime(fields.get("submission_deadline")),
-        delivery_deadline=_parse_datetime(fields.get("delivery_deadline")),
-        source_url=hit.canonical_url,
-        status=OpportunityStatus.NEW.value,
-        indicative_economics=economics,
+    opportunity = _create_opportunity_from_hit(
+        db,
+        user=user,
+        hit=hit,
+        run=run,
+        fields=fields,
+        economics=economics,
         notes=(
             f"Перенесено из мониторинга после AI-оценки реализуемости.\n"
             f"Поставщик: {feasibility.supplier_hint or 'не определён'}\n"
             f"{feasibility.summary}"
         ),
     )
-    db.add(opportunity)
-    db.flush()
-    attach_tender_link(db, user=user, opportunity=opportunity, url=hit.canonical_url)
-    initialize_opportunity_status(db, opportunity=opportunity, actor=user, actor_type="AI")
-
-    hit.opportunity_id = opportunity.id
-    hit.status = InternetSourceSearchHitStatus.OPPORTUNITY_CREATED.value
-    run.opportunities_created = int(run.opportunities_created or 0) + 1
-
     log_audit(
         db,
         actor=user,
@@ -252,7 +299,7 @@ def promote_search_hit_to_opportunity(db: Session, *, user: User, hit_id: uuid.U
         entity_type="Opportunity",
         entity_id=opportunity.id,
         new_value={
-            "source": "monitoring_promote",
+            "source": "monitoring_promote_legacy",
             "search_hit_id": str(hit.id),
             "search_run_id": str(run.id),
             "supplier_hint": feasibility.supplier_hint,
@@ -263,3 +310,105 @@ def promote_search_hit_to_opportunity(db: Session, *, user: User, hit_id: uuid.U
     db.refresh(hit)
     db.refresh(opportunity)
     return hit, opportunity
+
+
+def _promote_with_qualification(
+    db: Session,
+    *,
+    user: User,
+    hit: InternetSourceSearchHit,
+    run,
+    fields: dict,
+    mode: TenderPromotionMode,
+) -> tuple[InternetSourceSearchHit, Opportunity]:
+    record = _get_qualification_record(db, user=user, hit=hit)
+    if record is None:
+        if mode == TenderPromotionMode.AUTO_GATES:
+            record = qualify_search_hit(db, user=user, hit_id=hit.id)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Сначала выполните квалификацию тендера",
+            )
+
+    if not record.qualified or record.status == QualifiedRequirementStatus.REJECTED.value:
+        reason = record.rejection_reason or record.summary or "Тендер не прошёл квалификацию"
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=reason)
+
+    if mode == TenderPromotionMode.AUTO_GATES and not passes_auto_gates(record):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Оценка квалификации {record.qualification_score} ниже порога",
+        )
+
+    economics = _qualification_to_economics(record)
+    opportunity = _create_opportunity_from_hit(
+        db,
+        user=user,
+        hit=hit,
+        run=run,
+        fields=fields,
+        economics=economics,
+        notes=(
+            f"Перенесено из мониторинга после квалификации тендера.\n"
+            f"{record.summary or ''}"
+        ),
+    )
+    log_audit(
+        db,
+        actor=user,
+        action=AuditAction.CREATE,
+        entity_type="Opportunity",
+        entity_id=opportunity.id,
+        new_value={
+            "source": "monitoring_promote_qualified",
+            "search_hit_id": str(hit.id),
+            "search_run_id": str(run.id),
+            "qualification_score": float(record.qualification_score or 0.0),
+            "promotion_mode": mode.value,
+        },
+    )
+    db.commit()
+    db.refresh(hit)
+    db.refresh(opportunity)
+    return hit, opportunity
+
+
+def promote_search_hit_to_opportunity(db: Session, *, user: User, hit_id: uuid.UUID) -> tuple[InternetSourceSearchHit, Opportunity]:
+    hit = get_search_hit(db, user=user, hit_id=hit_id)
+    run = hit.search_run
+
+    if hit.opportunity_id:
+        opportunity = db.get(Opportunity, hit.opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked opportunity not found")
+        return hit, opportunity
+
+    fields = _validate_hit_for_promotion(hit)
+    _evaluate_hit_active(hit, run, fields)
+
+    mode = get_promotion_mode()
+    if mode == TenderPromotionMode.LEGACY:
+        return _promote_legacy(db, user=user, hit=hit, run=run, fields=fields)
+    return _promote_with_qualification(db, user=user, hit=hit, run=run, fields=fields, mode=mode)
+
+
+def auto_promote_qualified_hits(
+    db: Session,
+    *,
+    user: User,
+    hits: list[InternetSourceSearchHit],
+) -> int:
+    promoted = 0
+    for hit in hits:
+        if hit.opportunity_id or hit.status != InternetSourceSearchHitStatus.FOUND.value:
+            continue
+        record = _get_qualification_record(db, user=user, hit=hit)
+        if record is None or not passes_auto_gates(record):
+            continue
+        try:
+            promote_search_hit_to_opportunity(db, user=user, hit_id=hit.id)
+            promoted += 1
+        except HTTPException:
+            continue
+    return promoted

@@ -424,6 +424,7 @@ def list_search_hits(db: Session, *, user: User, run_id: uuid.UUID) -> list[Inte
     return list(
         db.scalars(
             select(InternetSourceSearchHit)
+            .options(joinedload(InternetSourceSearchHit.qualified_requirement))
             .where(InternetSourceSearchHit.search_run_id == run.id)
             .order_by(InternetSourceSearchHit.created_at.desc())
         )
@@ -661,6 +662,13 @@ def run_internet_source_search(
                 product_id=run.product_id,
                 hits=persisted_hits,
             )
+            from app.domain.enums import TenderPromotionMode
+            from app.services.tender_qualification import auto_qualify_search_hits, get_promotion_mode
+            from app.services.tender_promotion import auto_promote_qualified_hits
+
+            if get_promotion_mode() == TenderPromotionMode.AUTO_GATES:
+                auto_qualify_search_hits(db, user=user, hits=persisted_hits)
+                auto_promote_qualified_hits(db, user=user, hits=persisted_hits)
         run.status = InternetSourceSearchRunStatus.SUCCESS.value
         run.finished_at = datetime.now(timezone.utc)
         log_audit(

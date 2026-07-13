@@ -127,3 +127,32 @@ def test_promote_rejects_infeasible_hit(db, auth_client):
     refreshed = db.get(InternetSourceSearchHit, hit.id)
     assert refreshed.opportunity_id is None
     assert (refreshed.extracted_fields or {}).get("feasibility", {}).get("feasible") is False
+
+
+def test_qualify_search_hit(db, auth_client):
+    user = db.scalar(__import__("sqlalchemy").select(User).limit(1))
+    hit = _seed_hit(db, user)
+    response = auth_client.post(f"/internet-sources/search/hits/{hit.id}/qualify")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["qualification"]["qualified"] is True
+    assert body["hit"]["qualification"]["qualified"] is True
+
+
+def test_promote_requires_qualification_in_manual_mode(db, auth_client, monkeypatch):
+    monkeypatch.setattr(settings, "tender_promotion_mode", "manual")
+    user = db.scalar(__import__("sqlalchemy").select(User).limit(1))
+    hit = _seed_hit(db, user)
+    response = auth_client.post(f"/internet-sources/search/hits/{hit.id}/promote")
+    assert response.status_code == 400
+
+
+def test_manual_mode_qualify_then_promote(db, auth_client, monkeypatch):
+    monkeypatch.setattr(settings, "tender_promotion_mode", "manual")
+    user = db.scalar(__import__("sqlalchemy").select(User).limit(1))
+    hit = _seed_hit(db, user)
+    qualify = auth_client.post(f"/internet-sources/search/hits/{hit.id}/qualify")
+    assert qualify.status_code == 200
+    promote = auth_client.post(f"/internet-sources/search/hits/{hit.id}/promote")
+    assert promote.status_code == 200
+    assert promote.json()["opportunity_id"]

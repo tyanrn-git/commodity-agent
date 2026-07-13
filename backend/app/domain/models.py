@@ -1168,6 +1168,37 @@ class InternetSourceSearchHit(Base, TimestampMixin):
     search_run: Mapped["InternetSourceSearchRun"] = relationship(back_populates="hits")
     source: Mapped["InternetSource"] = relationship(back_populates="search_hits")
     opportunity: Mapped["Opportunity | None"] = relationship()
+    qualified_requirement: Mapped["QualifiedRequirement | None"] = relationship(
+        back_populates="search_hit", uselist=False
+    )
+
+
+class QualifiedRequirement(Base, TimestampMixin):
+    __tablename__ = "qualified_requirements"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    internet_source_search_hit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("internet_source_search_hits.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING", index=True)
+    qualified: Mapped[bool] = mapped_column(nullable=False, default=False)
+    qualification_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    structured_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    missing_fields: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    qualified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    search_hit: Mapped["InternetSourceSearchHit"] = relationship(back_populates="qualified_requirement")
+    owner: Mapped["User"] = relationship()
 
 
 class SupplierLeadContext(Base, TimestampMixin):

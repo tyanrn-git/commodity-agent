@@ -25,5 +25,9 @@ class Settings(BaseSettings):
     ai_provider: str = "openai"  # openai | mock
     email_provider: str = "mock"  # mock | gmail | graph
 
+    # Tender promotion: legacy | manual | auto_gates
+    tender_promotion_mode: str = "legacy"
+    auto_qualify_score_threshold: float = 0.65
+
 
 settings = Settings()

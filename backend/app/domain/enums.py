@@ -472,6 +472,19 @@ class AgentType(str, enum.Enum):
     LEGACY_TENDER_PROMOTION = "LEGACY_TENDER_PROMOTION"
 
 
+class TenderPromotionMode(str, enum.Enum):
+    LEGACY = "legacy"
+    MANUAL = "manual"
+    AUTO_GATES = "auto_gates"
+
+
+class QualifiedRequirementStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    QUALIFIED = "QUALIFIED"
+    REJECTED = "REJECTED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+
+
 class AgentTaskStatus(str, enum.Enum):
     PENDING = "PENDING"
     READY = "READY"
@@ -493,6 +506,7 @@ class AgentRunStatus(str, enum.Enum):
 class AgentResultType(str, enum.Enum):
     PRODUCT_RESOLUTION = "PRODUCT_RESOLUTION"
     TENDER_ENRICHMENT = "TENDER_ENRICHMENT"
+    TENDER_QUALIFICATION = "TENDER_QUALIFICATION"
     TENDER_FEASIBILITY = "TENDER_FEASIBILITY"
     TENDER_SEARCH = "TENDER_SEARCH"
     EXTRACTION = "EXTRACTION"

@@ -14,7 +14,10 @@ from app.api.schemas_internet_sources import (
     InternetSourceSearchRequest,
     InternetSourceSearchRunResponse,
     InternetSourceUpdate,
+    MonitoringConfigResponse,
     TenderHitPromoteResponse,
+    TenderHitQualifyResponse,
+    TenderQualificationSummary,
 )
 from app.db.session import get_db
 from app.domain.models import User
@@ -33,9 +36,21 @@ from app.services.internet_source_search import (
     list_search_runs,
     run_internet_source_search,
 )
-from app.services.tender_promotion import promote_search_hit_to_opportunity
+from app.services.tender_promotion import get_search_hit, promote_search_hit_to_opportunity
+from app.services.tender_qualification import get_promotion_mode, qualify_search_hit
+from app.config import settings
 
 router = APIRouter(prefix="/internet-sources", tags=["internet-sources"])
+
+
+@router.get("/monitoring-config", response_model=MonitoringConfigResponse)
+def get_monitoring_config(
+    current_user: User = Depends(get_current_user),
+):
+    return MonitoringConfigResponse(
+        promotion_mode=get_promotion_mode().value,
+        auto_qualify_score_threshold=settings.auto_qualify_score_threshold,
+    )
 
 
 def _parse_csv(value: str | None) -> list[str] | None:
@@ -209,6 +224,28 @@ def get_internet_source_search_hits(
         InternetSourceSearchHitResponse.from_model(hit, source_name=id_to_name.get(hit.internet_source_id))
         for hit in hits
     ]
+
+
+@router.post("/search/hits/{hit_id}/qualify", response_model=TenderHitQualifyResponse)
+def qualify_search_hit_route(
+    hit_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    record = qualify_search_hit(db, user=current_user, hit_id=hit_id, force=True)
+    hit = get_search_hit(db, user=current_user, hit_id=hit_id)
+    source = get_internet_source(db, user=current_user, source_id=hit.internet_source_id)
+    hit_response = InternetSourceSearchHitResponse.from_model(hit, source_name=source.name)
+    return TenderHitQualifyResponse(
+        hit=hit_response,
+        qualification=hit_response.qualification or TenderQualificationSummary(
+            status=record.status,
+            qualified=record.qualified,
+            qualification_score=float(record.qualification_score) if record.qualification_score is not None else None,
+            summary=record.summary,
+            rejection_reason=record.rejection_reason,
+        ),
+    )
 
 
 @router.post("/search/hits/{hit_id}/promote", response_model=TenderHitPromoteResponse)
