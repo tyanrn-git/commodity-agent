@@ -18,6 +18,7 @@ from app.api.schemas import (
     RequirementResponse,
     RequirementUpdate,
     SourceResponse,
+    SupplyDiscoveryResponse,
 )
 from app.db.session import get_db
 from app.domain.enums import AuditAction
@@ -103,6 +104,29 @@ def get_opportunity(
     if opportunity is None or opportunity.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opportunity not found")
     return opportunity
+
+
+@router.post("/opportunities/{opportunity_id}/supply-discovery", response_model=SupplyDiscoveryResponse)
+def run_supply_discovery(
+    opportunity_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.supply_discovery import _economics_preview, discover_supply_for_opportunity
+
+    opportunity, output, economics = discover_supply_for_opportunity(
+        db,
+        user=current_user,
+        opportunity_id=opportunity_id,
+    )
+    return SupplyDiscoveryResponse(
+        opportunity_id=opportunity.id,
+        supplier_hint=output.supplier_hint,
+        summary=output.summary,
+        economics_preview=_economics_preview(economics),
+        indicative_economics=economics,
+        confidence=float(output.confidence),
+    )
 
 
 @router.patch("/opportunities/{opportunity_id}", response_model=OpportunityResponse)

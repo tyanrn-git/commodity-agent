@@ -371,6 +371,20 @@ def _promote_with_qualification(
     db.commit()
     db.refresh(hit)
     db.refresh(opportunity)
+
+    if settings.auto_supply_discovery_after_promote:
+        try:
+            from app.services.supply_discovery import discover_supply_for_opportunity
+
+            opportunity, _, _ = discover_supply_for_opportunity(
+                db,
+                user=user,
+                opportunity_id=opportunity.id,
+            )
+            db.refresh(hit)
+        except HTTPException:
+            pass
+
     return hit, opportunity
 
 

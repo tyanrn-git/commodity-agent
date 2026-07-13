@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # Tender promotion: legacy | manual | auto_gates
     tender_promotion_mode: str = "legacy"
     auto_qualify_score_threshold: float = 0.65
+    auto_supply_discovery_after_promote: bool = True
 
 
 settings = Settings()

@@ -19,6 +19,7 @@ from app.ai.schemas import (
     TenderHitEnrichmentOutput,
     TenderQualificationOutput,
     TenderSearchOutput,
+    SupplyDiscoveryOutput,
     InternetSourceDiscoveryOutput,
 )
 
@@ -100,6 +101,8 @@ class MockAIProvider(AIProvider):
             payload = _match_tender_feasibility_fixture(user_prompt)
         elif output_schema is TenderQualificationOutput:
             payload = _match_tender_qualification_fixture(user_prompt)
+        elif output_schema is SupplyDiscoveryOutput:
+            payload = _match_supply_discovery_fixture(user_prompt)
         elif output_schema is InternetSourceDiscoveryOutput:
             payload = _match_internet_source_discovery_fixture(user_prompt)
         else:
@@ -489,6 +492,37 @@ def _match_tender_search_fixture(text: str) -> dict:
             for line in lines[:3]
         ],
         "notes": f"Extracted from real page text ({source_name})",
+    }
+
+
+def _match_supply_discovery_fixture(text: str) -> dict:
+    if re.search(r"office furniture|chairs and desks", text, re.IGNORECASE):
+        return {
+            "supplier_hint": None,
+            "supplier_reasoning": "No commodity supplier applicable.",
+            "summary": "Не найден подходящий поставщик для данного предмета закупки.",
+            "confidence": 0.2,
+            "risks": ["Несоответствие предмета закупки"],
+        }
+    supplier = "Gulf Fertilizer Trading FZE" if re.search(r"urea|carbamide", text, re.IGNORECASE) else "Black Sea Base Oils LLC"
+    return {
+        "supplier_hint": supplier,
+        "supplier_reasoning": "Поставщик покрывает маршрут и продукт по каталогу возможностей.",
+        "buy_price_per_unit": "285",
+        "buy_currency": "USD",
+        "buy_incoterm": "FOB",
+        "buy_basis": "FOB Middle East",
+        "sell_price_per_unit": "332",
+        "sell_currency": "USD",
+        "sell_incoterm": "CIF",
+        "sell_basis": "CIF destination",
+        "transport_cost": "28",
+        "gross_margin": "19",
+        "gross_margin_percent": 5.7,
+        "margin_currency": "USD",
+        "confidence": 0.74,
+        "summary": f"Предварительный сценарий через {supplier} выглядит реалистичным.",
+        "risks": ["Цены оценочные", "Нужно подтверждение объёма"],
     }
 
 

@@ -9,6 +9,7 @@ import { AgentActivityPanel } from "@/components/AgentActivityPanel";
 import { OpportunityStatusPanel } from "@/components/OpportunityStatusPanel";
 import { ProductResolutionPanel } from "@/components/ProductResolutionPanel";
 import { SupplierLeadPanel } from "@/components/SupplierLeadPanel";
+import { SupplyDiscoveryPanel } from "@/components/SupplyDiscoveryPanel";
 import { styles } from "@/lib/styles";
 
 const APPLY_FIELDS = [
@@ -183,6 +184,12 @@ export default function OpportunityDetailPage() {
 
         {opportunity.type === "SUPPLIER_OFFER" ? (
           <SupplierLeadPanel opportunityId={params.id} />
+        ) : opportunity.type === "AUTO_DISCOVERED" || opportunity.type === "TENDER" ? (
+          <SupplyDiscoveryPanel
+            opportunity={opportunity}
+            onUpdated={load}
+            onAgentActivity={() => setAgentActivityRefresh((value) => value + 1)}
+          />
         ) : null}
 
         <ProductResolutionPanel

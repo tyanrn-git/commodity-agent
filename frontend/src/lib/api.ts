@@ -142,6 +142,7 @@ export type Opportunity = {
   status_note: string | null;
   notes: string | null;
   source_url: string | null;
+  indicative_economics?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };
@@ -889,6 +890,15 @@ export const apiClient = {
   draftSupplierLeadOutreach: (matchId: string) =>
     api<SupplierLeadMatch>(`/supplier-lead-matches/${matchId}/draft-outreach`, { method: "POST" }),
   getOpportunity: (id: string) => api<Opportunity>(`/opportunities/${id}`),
+  runSupplyDiscovery: (id: string) =>
+    api<{
+      opportunity_id: string;
+      supplier_hint: string | null;
+      summary: string;
+      economics_preview: string | null;
+      indicative_economics: Record<string, unknown>;
+      confidence: number | null;
+    }>(`/opportunities/${id}/supply-discovery`, { method: "POST" }),
   changeOpportunityStatus: (id: string, data: { status: string; note?: string | null }) =>
     api<Opportunity>(`/opportunities/${id}/status`, {
       method: "POST",

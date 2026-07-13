@@ -106,6 +106,7 @@ class OpportunityResponse(BaseModel):
     status_note: str | None = None
     notes: str | None
     source_url: str | None = None
+    indicative_economics: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
@@ -343,6 +344,15 @@ class SupplierLeadDetailResponse(BaseModel):
     context: SupplierLeadContextResponse | None
     matches: list[SupplierLeadMatchResponse]
     market_comparison: dict | None
+
+
+class SupplyDiscoveryResponse(BaseModel):
+    opportunity_id: UUID
+    supplier_hint: str | None = None
+    summary: str
+    economics_preview: str | None = None
+    indicative_economics: dict
+    confidence: float | None = None
 
 
 class SupplierLedFromSupplyOfferCreate(BaseModel):

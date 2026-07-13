@@ -204,6 +204,26 @@ class TenderQualificationOutput(BaseModel):
     rejection_reason: str | None = None
 
 
+class SupplyDiscoveryOutput(BaseModel):
+    supplier_hint: str | None = None
+    supplier_reasoning: str | None = None
+    buy_price_per_unit: Decimal | None = None
+    buy_currency: str | None = None
+    buy_incoterm: str | None = None
+    buy_basis: str | None = None
+    sell_price_per_unit: Decimal | None = None
+    sell_currency: str | None = None
+    sell_incoterm: str | None = None
+    sell_basis: str | None = None
+    transport_cost: Decimal | None = None
+    gross_margin: Decimal | None = None
+    gross_margin_percent: float | None = None
+    margin_currency: str | None = None
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    summary: str
+    risks: list[str] = Field(default_factory=list)
+
+
 class TenderFeasibilityOutput(BaseModel):
     feasible: bool
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
